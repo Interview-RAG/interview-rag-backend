@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+sentence-transformers
+groq
+fpdf2
+ddgs
+pinecone
+supabase
