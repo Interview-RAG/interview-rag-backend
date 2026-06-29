@@ -1,6 +1,6 @@
 import os
 import json
-from sentence_transformers import SentenceTransformer
+import requests
 from groq import Groq
 from dotenv import load_dotenv
 from ddgs import DDGS
@@ -16,13 +16,26 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 pinecone_index = pc.Index("interview-qa")
 
-# Initialize Embedding Model
-# all-MiniLM-L6-v2 is small and fast for sentence embeddings
-embedder = SentenceTransformer('all-MiniLM-L6-v2')
-
 def get_embedding(text: str):
-    # Returns a list of floats
-    return embedder.encode(text).tolist()
+    # Using HuggingFace Inference API instead of local PyTorch to stay under Render's 512MB RAM limit!
+    API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+    headers = {}
+    
+    # Optional: If you add HUGGINGFACE_API_KEY to your .env, it prevents rate limits
+    hf_token = os.getenv("HUGGINGFACE_API_KEY")
+    if hf_token:
+        headers["Authorization"] = f"Bearer {hf_token}"
+        
+    try:
+        response = requests.post(API_URL, headers=headers, json={"inputs": [text], "options": {"wait_for_model": True}})
+        if response.status_code == 200:
+            return response.json()[0]
+        else:
+            print(f"HF Embedding Error: {response.text}")
+            return [0.0] * 384
+    except Exception as e:
+        print(f"Embedding request failed: {e}")
+        return [0.0] * 384
 
 def combine_answers(question: str, old_answer: str, new_answer: str) -> str:
     """
