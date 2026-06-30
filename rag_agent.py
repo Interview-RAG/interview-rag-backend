@@ -4,7 +4,7 @@ from typing import TypedDict, Annotated, Sequence
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
 
 import rag
@@ -37,7 +37,7 @@ def search_knowledge_base(query: str) -> str:
         if not retrieved_docs:
             return "No relevant information found in the knowledge base."
             
-        # Gemma has 262K context window, so we don't need aggressive truncation!
+        # Gemini has 1M context window, so we don't need any truncation!
         context = "\n\n".join([f"Q: {doc['questions']}\nA: {doc['answer']}" for doc in retrieved_docs])
             
         return context
@@ -68,14 +68,9 @@ def get_user_facts() -> str:
         print(f"LTM Retrieve Error: {e}")
         return "Failed to retrieve facts."
 
-# Initialize OpenRouter LLM
+# Initialize Gemini LLM
 def get_llm():
-    return ChatOpenAI(
-        model="google/gemma-4-26b-a4b-it:free",
-        openai_api_key=os.getenv("OPENROUTER_API_KEY"),
-        openai_api_base="https://openrouter.ai/api/v1",
-        temperature=0.3
-    )
+    return ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0.3)
 
 tools = [search_knowledge_base, save_user_fact]
 

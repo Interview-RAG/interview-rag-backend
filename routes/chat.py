@@ -57,7 +57,7 @@ def chat_with_rag(query: ChatQuery):
     # 2. Convert to LangChain messages
     messages = []
     
-    # We no longer need to prune the history because Gemma 4 supports a 262K context window!
+    # Gemini has a 1 Million Token context window!
     for msg in resp.data:
         if msg["role"] == "user":
             messages.append(HumanMessage(content=msg["content"]))
