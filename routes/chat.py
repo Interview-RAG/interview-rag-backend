@@ -56,10 +56,9 @@ def chat_with_rag(query: ChatQuery):
     
     # 2. Convert to LangChain messages
     messages = []
-    # Keep only the last 6 messages (3 interactions) to prevent Groq TPM rate limits!
-    recent_msgs = resp.data[-6:] if len(resp.data) > 6 else resp.data
     
-    for msg in recent_msgs:
+    # We no longer need to prune the history because Gemma 4 supports a 262K context window!
+    for msg in resp.data:
         if msg["role"] == "user":
             messages.append(HumanMessage(content=msg["content"]))
         elif msg["role"] == "ai":
