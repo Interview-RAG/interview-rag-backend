@@ -90,6 +90,22 @@ def get_collection():
         })
     return records
 
+@router.delete("/{qa_id}")
+def delete_qa(qa_id: int):
+    # Delete from Pinecone
+    try:
+        rag.pinecone_index.delete(ids=[str(qa_id)])
+    except Exception as e:
+        print(f"Pinecone delete error: {e}")
+        # proceed to delete from db even if pinecone fails
+    
+    # Delete from Supabase
+    resp = database.supabase.table("qa_records").delete().eq("id", qa_id).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Q&A not found")
+        
+    return {"message": "Deleted successfully"}
+
 
 class QuestionQuery(BaseModel):
     question: str
