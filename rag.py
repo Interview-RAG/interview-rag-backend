@@ -20,25 +20,18 @@ pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 pinecone_index = pc.Index("interview-qa")
 
 def get_embedding(text: str):
-    # Using HuggingFace Inference API instead of local PyTorch to stay under Render's 512MB RAM limit!
-    API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
-    headers = {}
-    
-    # Optional: If you add HUGGINGFACE_API_KEY to your .env, it prevents rate limits
-    hf_token = os.getenv("HUGGINGFACE_API_KEY")
-    if hf_token:
-        headers["Authorization"] = f"Bearer {hf_token}"
-        
+    # Use Pinecone's blazing fast Inference API instead of HuggingFace!
+    # This completely bypasses the Render DNS block and stays under 512MB RAM.
     try:
-        response = hf_session.post(API_URL, headers=headers, json={"inputs": [text], "options": {"wait_for_model": True}}, timeout=10)
-        if response.status_code == 200:
-            return response.json()[0]
-        else:
-            print(f"HF Embedding Error: {response.text}")
-            raise Exception(f"HuggingFace API returned status {response.status_code}")
+        response = pc.inference.embed(
+            model="llama-text-embed-v2",
+            inputs=[text],
+            parameters={"dimension": 384, "input_type": "query"}
+        )
+        return response.data[0].values
     except Exception as e:
-        print(f"Embedding request failed: {e}")
-        raise Exception("Could not connect to HuggingFace for embeddings. Please check your internet connection or try again later.")
+        print(f"Pinecone embedding failed: {e}")
+        raise Exception("Failed to generate embedding via Pinecone.")
 
 def combine_answers(question: str, old_answer: str, new_answer: str) -> str:
     """
