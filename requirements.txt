@@ -10,3 +10,7 @@ pinecone
 supabase
 PyPDF2
 python-multipart
+langgraph
+langchain-groq
+langchain-core
+langsmith
