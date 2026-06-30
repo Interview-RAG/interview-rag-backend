@@ -37,7 +37,12 @@ def search_knowledge_base(query: str) -> str:
         if not retrieved_docs:
             return "No relevant information found in the knowledge base."
             
-        context = "\n\n".join([f"Q: {doc['questions']}\nA: {doc['answer']}" for doc in retrieved_docs])
+        context = "\n\n".join([f"Q: {doc['questions']}\nA: {doc['answer'][:1500]}..." for doc in retrieved_docs])
+        
+        # Strictly truncate to ~4000 characters to stay well under Groq's 6000 Token limit!
+        if len(context) > 4000:
+            context = context[:4000] + "\n...[Context truncated due to length]"
+            
         return context
     except Exception as e:
         print(f"RAG Error: {e}")
