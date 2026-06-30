@@ -12,6 +12,9 @@ load_dotenv()
 # Ensure GROQ_API_KEY is in your .env file
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
 
+# Initialize global requests session to reuse TCP connections
+hf_session = requests.Session()
+
 # Initialize Pinecone
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 pinecone_index = pc.Index("interview-qa")
@@ -27,15 +30,15 @@ def get_embedding(text: str):
         headers["Authorization"] = f"Bearer {hf_token}"
         
     try:
-        response = requests.post(API_URL, headers=headers, json={"inputs": [text], "options": {"wait_for_model": True}})
+        response = hf_session.post(API_URL, headers=headers, json={"inputs": [text], "options": {"wait_for_model": True}}, timeout=10)
         if response.status_code == 200:
             return response.json()[0]
         else:
             print(f"HF Embedding Error: {response.text}")
-            return [0.0] * 384
+            raise Exception(f"HuggingFace API returned status {response.status_code}")
     except Exception as e:
         print(f"Embedding request failed: {e}")
-        return [0.0] * 384
+        raise Exception("Could not connect to HuggingFace for embeddings. Please check your internet connection or try again later.")
 
 def combine_answers(question: str, old_answer: str, new_answer: str) -> str:
     """
@@ -190,3 +193,85 @@ Context:
     except Exception as e:
         print(f"Error calling Groq API: {e}")
         return "An error occurred while generating the response."
+
+
+def generate_answer_for_question(question: str) -> str:
+    """
+    Uses Groq LLM to generate a comprehensive answer for a single interview question.
+    """
+    if not os.getenv("GROQ_API_KEY"):
+        return "GROQ_API_KEY not configured. Cannot generate an answer."
+
+    prompt = f"""
+You are an expert technical interviewer and educator. 
+A student has asked the following interview question: "{question}"
+
+Please provide a clear, accurate, and comprehensive answer to this question. 
+Format your response nicely, using bullet points or paragraphs as appropriate.
+Do not include any conversational filler, just the answer.
+"""
+    try:
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful expert answering technical questions."
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model="llama-3.1-8b-instant",
+            temperature=0.3,
+        )
+        return chat_completion.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Error calling Groq API: {e}")
+        return "An error occurred while generating the answer."
+
+def parse_pdf_text_to_qa(text: str) -> list:
+    """
+    Uses Groq LLM to extract Q&A pairs from raw text.
+    """
+    if not os.getenv("GROQ_API_KEY"):
+        print("No Groq API key")
+        return []
+
+    prompt = f"""
+You are an intelligent document parsing assistant. 
+I have extracted the following text from a PDF document.
+
+Extract each question and its corresponding answer and return them as JSON.
+The JSON object MUST have a single key "qa_pairs" which is an array of objects.
+Each object in the array MUST have two keys: "question" and "answer".
+If you cannot find any questions or answers, return {{"qa_pairs": []}}.
+
+Text:
+{text[:6000]}
+"""
+    try:
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a JSON parsing assistant. You always output a valid JSON object."
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model="llama-3.1-8b-instant",
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
+        
+        response_text = chat_completion.choices[0].message.content.strip()
+        parsed = json.loads(response_text)
+        return parsed.get("qa_pairs", [])
+            
+    except Exception as e:
+        print(f"Error calling Groq API: {e}")
+        return []
+
