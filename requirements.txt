@@ -16,3 +16,5 @@ langchain-core
 langsmith
 langchain-google-genai
 langchain-openai
+langchain-community
+duckduckgo-search
