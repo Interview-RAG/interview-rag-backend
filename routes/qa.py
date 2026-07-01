@@ -13,10 +13,9 @@ class QACreate(BaseModel):
     question: str
     answer: str
 
-@router.post("")
-def add_qa(qa: QACreate):
+def save_qa_logic(question: str, answer: str):
     # 1. Embed the incoming question
-    embedding = rag.get_embedding(qa.question)
+    embedding = rag.get_embedding(question)
     
     # 2. Search for similar questions in Pinecone
     try:
@@ -44,11 +43,11 @@ def add_qa(qa: QACreate):
                 existing_record = resp.data[0]
                 questions = json.loads(existing_record['questions_json']) if isinstance(existing_record['questions_json'], str) else existing_record['questions_json']
                 
-                if qa.question not in questions:
-                    questions.append(qa.question)
+                if question not in questions:
+                    questions.append(question)
                 
                 # Combine answers using Groq LLM
-                refined_answer = rag.combine_answers(qa.question, existing_record['answer'], qa.answer)
+                refined_answer = rag.combine_answers(question, existing_record['answer'], answer)
                 
                 # Update Supabase
                 database.supabase.table("qa_records").update({
@@ -60,8 +59,8 @@ def add_qa(qa: QACreate):
     
     # If not similar, create a new record in Supabase
     new_record_resp = database.supabase.table("qa_records").insert({
-        "questions_json": json.dumps([qa.question]),
-        "answer": qa.answer
+        "questions_json": json.dumps([question]),
+        "answer": answer
     }).execute()
     
     new_id = new_record_resp.data[0]['id']
@@ -71,11 +70,15 @@ def add_qa(qa: QACreate):
         vectors=[{
             "id": str(new_id),
             "values": embedding,
-            "metadata": {"answer": qa.answer}
+            "metadata": {"answer": answer}
         }]
     )
     
     return {"message": "New Q&A added successfully.", "id": new_id}
+
+@router.post("")
+def add_qa(qa: QACreate):
+    return save_qa_logic(qa.question, qa.answer)
 
 @router.get("")
 def get_collection():
