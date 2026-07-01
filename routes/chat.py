@@ -54,6 +54,15 @@ def chat_with_rag(query: ChatQuery):
     # 1. Fetch history from DB
     resp = database.supabase.table("chat_messages").select("*").eq("session_id", query.session_id).order("created_at").execute()
     
+    session_title = None
+    if len(resp.data) == 0:
+        # First message in session, auto-generate title
+        title = " ".join(query.query.split()[:5])
+        if len(query.query.split()) > 5:
+            title += "..."
+        database.supabase.table("chat_sessions").update({"title": title}).eq("id", query.session_id).execute()
+        session_title = title
+    
     # 2. Convert to LangChain messages
     messages = []
     
@@ -96,5 +105,5 @@ def chat_with_rag(query: ChatQuery):
         print(f"Agent error: {e}")
         answer = "Sorry, I encountered an error answering your question."
     
-    return {"answer": answer}
+    return {"answer": answer, "session_title": session_title}
 
