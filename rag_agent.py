@@ -4,7 +4,7 @@ from typing import TypedDict, Annotated, Sequence
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_mistralai import ChatMistralAI
 from langchain_core.tools import tool
 from langchain_community.tools import DuckDuckGoSearchRun
 
@@ -82,7 +82,7 @@ def search_web(query: str) -> str:
 
 # Initialize Gemini LLM
 def get_llm():
-    return ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0.3)
+    return ChatMistralAI(model="mistral-small-latest", temperature=0.3)
 
 tools = [search_knowledge_base, save_user_fact, search_web]
 

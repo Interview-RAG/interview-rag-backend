@@ -18,3 +18,4 @@ langchain-google-genai
 langchain-openai
 langchain-community
 duckduckgo-search
+langchain-mistralai

@@ -59,6 +59,8 @@ def chat_with_rag(query: ChatQuery):
     
     # Gemini has a 1 Million Token context window!
     for msg in resp.data:
+        if not msg["content"].strip():
+            continue
         if msg["role"] == "user":
             messages.append(HumanMessage(content=msg["content"]))
         elif msg["role"] == "ai":
