@@ -1,6 +1,7 @@
 import json
 import logging
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import database
 import rag
@@ -53,7 +54,7 @@ class ChatQuery(BaseModel):
     session_id: str
 
 @router.post("")
-def chat_with_rag(query: ChatQuery):
+async def chat_with_rag(query: ChatQuery):
     # 1. Fetch history from DB
     resp = database.supabase.table("chat_messages").select("*").eq("session_id", query.session_id).order("created_at").execute()
     
@@ -66,11 +67,13 @@ def chat_with_rag(query: ChatQuery):
         database.supabase.table("chat_sessions").update({"title": title}).eq("id", query.session_id).execute()
         session_title = title
     
-    # 2. Convert to LangChain messages
+    # 2. Convert to LangChain messages (Limit to last 10 to avoid Groq 8k TPM limits)
     messages = []
     
-    # Gemini has a 1 Million Token context window!
-    for msg in resp.data:
+    # Slice to keep only the last 10 messages from the history
+    recent_history = resp.data[-10:] if len(resp.data) > 10 else resp.data
+    
+    for msg in recent_history:
         if not msg["content"].strip():
             continue
         if msg["role"] == "user":
@@ -88,57 +91,77 @@ def chat_with_rag(query: ChatQuery):
         "content": query.query
     }).execute()
     
-    # 5. Invoke LangGraph
-    logger.info(f"Invoking agent for session {query.session_id} with query: {query.query}")
-    try:
-        config = {"configurable": {"thread_id": query.session_id}}
-        final_state = app_graph.invoke(
-            {"messages": messages, "session_id": query.session_id},
-            config=config
-        )
-        
-        # 6. Check if graph is interrupted (HITL)
-        state_snapshot = app_graph.get_state(config)
-        if state_snapshot.next and "sensitive_tools" in state_snapshot.next:
-            # We are interrupted before saving. Send ALL approval requests to frontend.
-            last_message = final_state["messages"][-1]
-            if hasattr(last_message, "tool_calls"):
-                approvals_needed = []
-                for tool_call in last_message.tool_calls:
-                    if tool_call["name"] == "save_qa_to_collection":
-                        args = tool_call["args"]
-                        approvals_needed.append({
-                            "question": args.get("question", ""), 
-                            "answer": args.get("answer", ""), 
-                            "tool_call_id": tool_call["id"]
-                        })
-                
-                if approvals_needed:
-                    logger.info(f"Graph interrupted. Sending {len(approvals_needed)} items for HITL approval.")
-                    return {
-                        "status": "requires_approval", 
-                        "approvals": approvals_needed,
-                        "answer_msg": f"I have drafted {len(approvals_needed)} Q&A pairs. Please review and approve them before I save.",
-                        "session_title": session_title
-                    }
-        
-        # 7. Normal completion
-        final_message = final_state["messages"][-1]
-        answer = final_message.content
-        
-        # 8. Save AI message to DB
-        database.supabase.table("chat_messages").insert({
-            "session_id": query.session_id,
-            "role": "ai",
-            "content": answer
-        }).execute()
-        
-    except Exception as e:
-        logger.error(f"Agent error in chat endpoint: {e}", exc_info=True)
-        answer = "Sorry, I encountered an error answering your question."
+    # 5. Invoke LangGraph via Streaming
+    logger.info(f"Streaming agent for session {query.session_id} with query: {query.query}")
     
-    logger.info(f"Returning answer for session {query.session_id}")
-    return {"status": "success", "answer": answer, "session_title": session_title}
+    async def event_stream():
+        config = {"configurable": {"thread_id": query.session_id}}
+        
+        if session_title:
+            yield f"data: {json.dumps({'type': 'session_title', 'title': session_title})}\n\n"
+            
+        try:
+            # Use astream with stream_mode="updates" instead of astream_events.
+            # astream_events forces Groq into streaming mode, which causes Llama 3.3
+            # to malform tool call names (e.g. 'search_web {"query": "..."}').
+            # stream_mode="updates" uses non-streaming invoke internally per node,
+            # then emits the result of each node as it completes — giving us real-time
+            # tool notifications without triggering Groq's streaming tool call bug.
+            async for chunk in app_graph.astream(
+                {"messages": messages, "session_id": query.session_id},
+                config=config,
+                stream_mode="updates"
+            ):
+                for node_name, state_update in chunk.items():
+                    # When the "agent" node finishes, check if it decided to use tools
+                    if node_name == "agent":
+                        last_msg = state_update["messages"][-1]
+                        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                            for tc in last_msg.tool_calls:
+                                yield f"data: {json.dumps({'type': 'tool_start', 'name': tc['name']})}\n\n"
+                    
+                    # When a "tools" node finishes, the tool has completed execution
+                    elif node_name == "tools":
+                        yield f"data: {json.dumps({'type': 'tool_end', 'name': 'tool'})}\n\n"
+            
+            # 6. Check if graph is interrupted (HITL)
+            state_snapshot = app_graph.get_state(config)
+            if state_snapshot.next and "sensitive_tools" in state_snapshot.next:
+                last_message = state_snapshot.values["messages"][-1]
+                if hasattr(last_message, "tool_calls"):
+                    approvals_needed = []
+                    for tool_call in last_message.tool_calls:
+                        if tool_call["name"] == "save_qa_to_collection":
+                            args = tool_call["args"]
+                            approvals_needed.append({
+                                "question": args.get("question", ""), 
+                                "answer": args.get("answer", ""), 
+                                "tool_call_id": tool_call["id"]
+                            })
+                    
+                    if approvals_needed:
+                        logger.info(f"Graph interrupted. Sending {len(approvals_needed)} items for HITL approval.")
+                        yield f"data: {json.dumps({'type': 'requires_approval', 'approvals': approvals_needed, 'answer_msg': f'I have drafted {len(approvals_needed)} Q&A pairs. Please review and approve them before I save.'})}\n\n"
+                        return
+                        
+            # 7. Normal completion
+            final_message = state_snapshot.values["messages"][-1]
+            answer = final_message.content
+            
+            # 8. Save AI message to DB
+            database.supabase.table("chat_messages").insert({
+                "session_id": query.session_id,
+                "role": "ai",
+                "content": answer
+            }).execute()
+            
+            yield f"data: {json.dumps({'type': 'final_answer', 'content': answer})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Agent error in stream endpoint: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Sorry, I encountered an error answering your question.'})}\n\n"
+            
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 # --- HITL Approve Save Endpoint ---
 class ApprovalItem(BaseModel):
