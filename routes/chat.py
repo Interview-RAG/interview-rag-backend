@@ -1,5 +1,6 @@
 import json
 import logging
+import asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -21,30 +22,40 @@ class SessionRename(BaseModel):
     title: str
 
 @router.get("/sessions")
-def get_sessions():
-    resp = database.supabase.table("chat_sessions").select("*").order("created_at", desc=True).execute()
+async def get_sessions():
+    def fetch_sessions():
+        return database.supabase.table("chat_sessions").select("*").order("created_at", desc=True).execute()
+    resp = await asyncio.to_thread(fetch_sessions)
     return resp.data
 
 @router.post("/sessions")
-def create_session(session: SessionCreate):
-    resp = database.supabase.table("chat_sessions").insert({"title": session.title}).execute()
+async def create_session(session: SessionCreate):
+    def insert_session():
+        return database.supabase.table("chat_sessions").insert({"title": session.title}).execute()
+    resp = await asyncio.to_thread(insert_session)
     return resp.data[0]
 
 @router.put("/sessions/{session_id}")
-def rename_session(session_id: str, session: SessionRename):
-    resp = database.supabase.table("chat_sessions").update({"title": session.title}).eq("id", session_id).execute()
+async def rename_session(session_id: str, session: SessionRename):
+    def update_session():
+        return database.supabase.table("chat_sessions").update({"title": session.title}).eq("id", session_id).execute()
+    resp = await asyncio.to_thread(update_session)
     if not resp.data:
         raise HTTPException(status_code=404, detail="Session not found")
     return resp.data[0]
 
 @router.delete("/sessions/{session_id}")
-def delete_session(session_id: str):
-    database.supabase.table("chat_sessions").delete().eq("id", session_id).execute()
+async def delete_session(session_id: str):
+    def run_delete():
+        return database.supabase.table("chat_sessions").delete().eq("id", session_id).execute()
+    await asyncio.to_thread(run_delete)
     return {"message": "Session deleted"}
 
 @router.get("/sessions/{session_id}/messages")
-def get_session_messages(session_id: str):
-    resp = database.supabase.table("chat_messages").select("*").eq("session_id", session_id).order("created_at").execute()
+async def get_session_messages(session_id: str):
+    def fetch_messages():
+        return database.supabase.table("chat_messages").select("*").eq("session_id", session_id).order("created_at").execute()
+    resp = await asyncio.to_thread(fetch_messages)
     return resp.data
 
 # --- Chat Endpoint ---
@@ -56,7 +67,9 @@ class ChatQuery(BaseModel):
 @router.post("")
 async def chat_with_rag(query: ChatQuery):
     # 1. Fetch history from DB
-    resp = database.supabase.table("chat_messages").select("*").eq("session_id", query.session_id).order("created_at").execute()
+    def fetch_msgs():
+        return database.supabase.table("chat_messages").select("*").eq("session_id", query.session_id).order("created_at").execute()
+    resp = await asyncio.to_thread(fetch_msgs)
     
     session_title = None
     if len(resp.data) == 0:
@@ -64,7 +77,9 @@ async def chat_with_rag(query: ChatQuery):
         title = " ".join(query.query.split()[:5])
         if len(query.query.split()) > 5:
             title += "..."
-        database.supabase.table("chat_sessions").update({"title": title}).eq("id", query.session_id).execute()
+        def update_title():
+            return database.supabase.table("chat_sessions").update({"title": title}).eq("id", query.session_id).execute()
+        await asyncio.to_thread(update_title)
         session_title = title
     
     # 2. Convert to LangChain messages (Limit to last 10 to avoid Groq 8k TPM limits)
@@ -85,11 +100,13 @@ async def chat_with_rag(query: ChatQuery):
     messages.append(HumanMessage(content=query.query))
     
     # 4. Save user message to DB
-    database.supabase.table("chat_messages").insert({
-        "session_id": query.session_id,
-        "role": "user",
-        "content": query.query
-    }).execute()
+    def insert_user_msg():
+        return database.supabase.table("chat_messages").insert({
+            "session_id": query.session_id,
+            "role": "user",
+            "content": query.query
+        }).execute()
+    await asyncio.to_thread(insert_user_msg)
     
     # 5. Invoke LangGraph via Streaming
     logger.info(f"Streaming agent for session {query.session_id} with query: {query.query}")
@@ -149,11 +166,13 @@ async def chat_with_rag(query: ChatQuery):
             answer = final_message.content
             
             # 8. Save AI message to DB
-            database.supabase.table("chat_messages").insert({
-                "session_id": query.session_id,
-                "role": "ai",
-                "content": answer
-            }).execute()
+            def insert_ai_msg():
+                return database.supabase.table("chat_messages").insert({
+                    "session_id": query.session_id,
+                    "role": "ai",
+                    "content": answer
+                }).execute()
+            await asyncio.to_thread(insert_ai_msg)
             
             yield f"data: {json.dumps({'type': 'final_answer', 'content': answer})}\n\n"
             
@@ -175,7 +194,7 @@ class ApproveSaveRequest(BaseModel):
     approvals: list[ApprovalItem]
 
 @router.post("/approve-save")
-def approve_save(req: ApproveSaveRequest):
+async def approve_save(req: ApproveSaveRequest):
     config = {"configurable": {"thread_id": req.session_id}}
     state_snapshot = app_graph.get_state(config)
     
@@ -197,7 +216,7 @@ def approve_save(req: ApproveSaveRequest):
             item = approval_map.get(tc["id"])
             if item and item.approved:
                 try:
-                    result = save_qa_logic(item.question, item.answer)
+                    result = await save_qa_logic(item.question, item.answer)
                     msg = f"Successfully saved to collection: {result['message']}"
                     logger.info(f"User approved save for {tc['id']}")
                 except Exception as e:
@@ -217,15 +236,17 @@ def approve_save(req: ApproveSaveRequest):
     )
     
     # Resume the graph
-    final_state = app_graph.invoke(None, config=config)
+    final_state = await app_graph.ainvoke(None, config=config)
     final_message = final_state["messages"][-1]
     
     # Save the final AI message to DB
-    database.supabase.table("chat_messages").insert({
-        "session_id": req.session_id,
-        "role": "ai",
-        "content": final_message.content
-    }).execute()
+    def insert_final_msg():
+        return database.supabase.table("chat_messages").insert({
+            "session_id": req.session_id,
+            "role": "ai",
+            "content": final_message.content
+        }).execute()
+    await asyncio.to_thread(insert_final_msg)
     
     return {"status": "success", "answer": final_message.content}
 

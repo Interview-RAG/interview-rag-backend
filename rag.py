@@ -1,7 +1,7 @@
 import os
 import json
-import requests
-from groq import Groq
+import asyncio
+from groq import AsyncGroq
 from dotenv import load_dotenv
 from ddgs import DDGS
 from pinecone import Pinecone
@@ -9,21 +9,19 @@ from pinecone import Pinecone
 load_dotenv()
 
 # Initialize Groq client
-# Ensure GROQ_API_KEY is in your .env file
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
-
-# Initialize global requests session to reuse TCP connections
-hf_session = requests.Session()
+# Check to avoid crashing if key is missing on startup
+groq_api_key = os.getenv("GROQ_API_KEY", "")
+groq_client = AsyncGroq(api_key=groq_api_key) if groq_api_key else None
 
 # Initialize Pinecone
 pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 pinecone_index = pc.Index("interview-qa")
 
-def get_embedding(text: str):
+async def get_embedding(text: str):
     # Use Pinecone's blazing fast Inference API instead of HuggingFace!
-    # This completely bypasses the Render DNS block and stays under 512MB RAM.
     try:
-        response = pc.inference.embed(
+        response = await asyncio.to_thread(
+            pc.inference.embed,
             model="llama-text-embed-v2",
             inputs=[text],
             parameters={"dimension": 384, "input_type": "query"}
@@ -33,11 +31,11 @@ def get_embedding(text: str):
         print(f"Pinecone embedding failed: {e}")
         raise Exception("Failed to generate embedding via Pinecone.")
 
-def combine_answers(question: str, old_answer: str, new_answer: str) -> str:
+async def combine_answers(question: str, old_answer: str, new_answer: str) -> str:
     """
     Uses Groq LLM to summarize and combine the existing and new answers.
     """
-    if not os.getenv("GROQ_API_KEY"):
+    if not groq_client:
         # Fallback if no API key is provided
         return f"{old_answer}\n\n---\n\n{new_answer}"
 
@@ -52,7 +50,7 @@ Answer 2: {new_answer}
 Please combine, refine, and summarize these two answers into a single, comprehensive, and well-structured answer. Ensure all key points are covered accurately.
 """
     try:
-        chat_completion = groq_client.chat.completions.create(
+        chat_completion = await groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "user",
@@ -68,22 +66,24 @@ Please combine, refine, and summarize these two answers into a single, comprehen
         return f"{old_answer}\n\n---\n\n{new_answer}"
 
 
-def web_search(query: str) -> str:
+async def web_search(query: str) -> str:
     """Helper function to perform web search using DuckDuckGo."""
     try:
-        results = DDGS().text(query, max_results=3)
+        def sync_search():
+            return DDGS().text(query, max_results=3)
+        results = await asyncio.to_thread(sync_search)
         if not results:
             return "No results found."
         return "\n\n".join([f"Title: {r['title']}\nSnippet: {r['body']}\nSource: {r['href']}" for r in results])
     except Exception as e:
         return f"Web search failed: {e}"
 
-def generate_rag_answer(user_query: str, retrieved_docs: list) -> str:
+async def generate_rag_answer(user_query: str, retrieved_docs: list) -> str:
     """
     Uses Groq LLM to answer a user's query based on retrieved contexts.
     If the context lacks the answer, uses the web_search tool to find it.
     """
-    if not os.getenv("GROQ_API_KEY"):
+    if not groq_client:
         return "GROQ_API_KEY not configured. Cannot generate a response."
 
     context = "\n\n".join([f"Q: {doc['questions']}\nA: {doc['answer']}" for doc in retrieved_docs])
@@ -129,7 +129,7 @@ Context:
     try:
         # Allow up to 3 tool call iterations to support complex queries
         for iteration in range(3):
-            response = groq_client.chat.completions.create(
+            response = await groq_client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=messages,
                 tools=tools,
@@ -160,7 +160,7 @@ Context:
                     if tool_call.function.name == "web_search":
                         args = json.loads(tool_call.function.arguments)
                         print(f"Executing web search for: {args['query']}")
-                        search_result = web_search(args["query"])
+                        search_result = await web_search(args["query"])
                         
                         messages.append({
                             "role": "tool",
@@ -188,11 +188,11 @@ Context:
         return "An error occurred while generating the response."
 
 
-def generate_answer_for_question(question: str) -> str:
+async def generate_answer_for_question(question: str) -> str:
     """
     Uses Groq LLM to generate a comprehensive answer for a single interview question.
     """
-    if not os.getenv("GROQ_API_KEY"):
+    if not groq_client:
         return "GROQ_API_KEY not configured. Cannot generate an answer."
 
     prompt = f"""
@@ -204,7 +204,7 @@ Format your response nicely, using bullet points or paragraphs as appropriate.
 Do not include any conversational filler, just the answer.
 """
     try:
-        chat_completion = groq_client.chat.completions.create(
+        chat_completion = await groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -223,11 +223,11 @@ Do not include any conversational filler, just the answer.
         print(f"Error calling Groq API: {e}")
         return "An error occurred while generating the answer."
 
-def parse_pdf_text_to_qa(text: str) -> list:
+async def parse_pdf_text_to_qa(text: str) -> list:
     """
     Uses Groq LLM to extract Q&A pairs from raw text.
     """
-    if not os.getenv("GROQ_API_KEY"):
+    if not groq_client:
         print("No Groq API key")
         return []
 
@@ -244,7 +244,7 @@ Text:
 {text[:6000]}
 """
     try:
-        chat_completion = groq_client.chat.completions.create(
+        chat_completion = await groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
@@ -267,4 +267,3 @@ Text:
     except Exception as e:
         print(f"Error calling Groq API: {e}")
         return []
-
