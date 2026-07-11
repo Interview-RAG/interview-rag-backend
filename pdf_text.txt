@@ -1,0 +1,376 @@
+--- FILE 1 ---
+100 Machine Learning Interview Questions and
+Answers
+1. Please Explain Machine Learning, Artificial Intelligence, And Deep Learning?
+Machine learning is defined as a subset of Artificial Intelligence, and it contains the techniques
+which enable computers to sort things out from the data and deliver Artificial Intelligence
+applications. Artificial Intelligence (AI) is a branch of computer science that is mainly focused on
+building smart machines that can perform certain tasks that mainly require human intelligence. It
+is the venture to replicate or simulate human intelligence in machines.
+Deep learning can be defined as a class of machine learning algorithms in Artificial Intelligence
+that mainly uses multiple layers to cumulatively extract higher-level features from the given raw
+input.
+2. How Difficult Is Machine Learning?
+Machine Learning is huge and comprises a lot of things. Therefore, it will take more than six
+months to learn Machine Learning if you spend at least 6-7 hours per day. If you have good
+hands-on mathematical and analytical skills, then six months will be sufficient for you.
+3. Can You Explain Kernel Trick In An SVM Algorithm?
+A Kernel Trick is a method where the Non-Linear data is projected onto a bigger dimension
+space in order to make it easy to classify the data where it can be linearly divided by a plane.
+4. Can You List Some Of The Popular Cross-Validation Techniques?
+1.
+Holdout Method: This kind of technique works by removing the part of the training data
+set and sending the same to the model that was trained on the remaining data set to get
+the required predictions.
+2.
+K-Fold Cross-Validation: Here, the data is divided into k subsets so that every time, one
+among the k subsets can be used as a validation set, and the other k-1 subsets are used
+as the training set
+3.
+Stratified K-Fold Cross-Validation: It works on imbalanced data.
+4.
+Leave-P-Out Cross-Validation: Here, we leave p data points out of the training data out
+of the n data points, then we use the n-p samples to train the model and p points for the
+validation set.
+5. Differences Between The Bagging And Boosting Algorithms?
+Bagging
+Boosting
+It is a method that merges the same type of 
+predictions.
+It is a method that merges the different types 
+of predictions.
+It decreases the variance, not the bias
+It decreases the bias, not the variance.
+Each and every model receives equal weight
+Models are weighed based on performance.
+6. What Are Kernels In SVM? Can You List Some Popular Kernels Used In SVM?
+The kernel is basically used to set mathematical functions that are used in the Support Vector
+Machine by providing the window to manipulate the data. Kernel Function is used to transform
+the training set of data so that a non-linear decision surface will be transformed to a linear
+equation in a bigger number of dimension spaces.
+Some of the popular kernels used in SVM are:
+1.
+Polynomial kernel
+2.
+Gaussian kernel
+3.
+Gaussian radial basis function (RBF)
+4.
+Laplace RBF kernel
+5.
+Hyperbolic tangent kernel
+6.
+Sigmoid kernel
+7.
+Bessel function of the first kind Kernel
+8.
+ANOVA radial basis kernel
+7. Can You Explain The OOB Error?
+An out-of-bag error called OBB error, also known as an out-of-bag estimate, is a technique to
+measure the prediction error of random forests, boosted decision trees. Bagging mainly uses
+subsampling with replacement to create the training samples for the model to learn from them.
+8. Can You Differentiate Between K-Means And KNN Algorithms?
+K-Means
+KNN algorithms
+It is unsupervised machine learning.
+It is supervised machine learning.
+It is a clustering machine learning algorithm.
+It is a classification or regression machine 
+learning algorithm.
+Its performance is slow.
+It performs much better.
+It is an eager learner.
+It is a lazy learner.
+9. Explain The Term Variance Inflation Factor Mean?
+Variance inflation factor known as VIF is a measure of the amount of multicollinearity in the
+given set of multiple regression variables. The ratio here is calculated for each of the
+independent variables. A high VIF means that the associated independent variable is mostly
+collinear with the other variables in the model.
+10. Explain SVM (Support Vector Machines) In Machine Learning?
+Support Vector Machine, known as SVM, is one of the most commonly used Supervised
+Learning algorithms that is mainly used for Classification as well as Regression problems. It is
+primarily used for Classification problems in Machine Learning. The main aim of the SVM
+algorithm is to create the best decision boundary, which segregates n-dimensional space into
+classes so that one can easily put the new obtained data point in the correct category in the
+future.
+11. Differentiate Between Supervised And Unsupervised Machine Learning?
+Supervised Model
+Unsupervised Model
+Here, the algorithm learns on a labeled 
+dataset,
+Here, it provides unlabeled data.
+Here, the models need to find the mapping 
+function that is used to map the input variable 
+(X) with the output variable (Y).
+The main aim of unsupervised learning is to 
+find the structure and patterns from the given 
+input data.
+12. Explain The Terms Precision And Recall?
+Precision, also known as a positive predictive value, is defined as the fraction of relevant
+instances among the retrieved instances.
+Precision = TP/TP+FP
+Where TP is true positive
+FP id False Positive
+Recall, also known as sensitivity, is defined as the fraction of relevant instances that were
+Retrieved.
+Recall  = TP/TP+FP.
+Where TP is true positive
+FP is False positive.
+13. Differentiate Between L1 And L2 Regularization?
+L1 Regularization
+L2 Regularization
+A regression model that makes use of the L1 
+regularization process is called Lasso 
+Regression.
+A regression model that makes use of the L1 
+regularization process is called Ridge 
+Regression.
+Lasso Regression adds the absolute value of 
+the magnitude of coefficient as a penalty term 
+to the loss function.
+Ridge regression adds the squared 
+magnitude of coefficient as a penalty term to 
+the loss function.
+It tries to estimate the median of the data.
+It tries to estimate the mean of the data.
+14. Explain Fourier Transform?
+The Fourier transform is a way to split something up into a bunch of sine waves. In terms of
+mathematics, The Fourier Transform is a process that can transform a signal into its respective
+constituent components and frequencies. Fourier transform is used not only in signal, radio,
+acoustic, etc.
+15. What Is The F1 Score? How To Use It?
+The F1-score combines both the precision and recall of a classifier into one single metric by
+taking the harmonic mean. It is used to compare the performances of two classifiers. For
+example, classifier X has a higher recall, and classifier Y  has higher precision. Now the
+F1-scores calculated for both the classifiers will be used to predict which one produces the
+better results.
+The F1 score can be calculated as
+2(P*R)/(P+R)
+Where P is the precision.
+R is the Recall of the classification model.
+Machine Learning Interview Questions And Answers
+16. Differentiate Between Type I And Type II Error?
+Type I Error
+Type II Error
+It is equivalent to a False positive.
+It is equivalent to a False negative
+It refers to non-acceptance of hypothesis
+It refers to the acceptance of the hypothesis
+There can be a rejection even with an 
+authorized match.
+There can be an acceptance even with an 
+unauthorized match.
+17. Can You Explain How A ROC Curve Works?
+The  ROC curve is represented graphically by plotting the true positive rate (TPR) against the
+FPR (False Positive rates). Where
+1.
+The true positive rate can be defined as the proportion of observations that are predicted
+to be positive out of all the given positive observations (TP/(TP + FN))
+2.
+The false-positive rate is defined as the proportion of observations that are predicted
+wrongly to be positive out of all the given negative observations.
+(FP/(TN + FP))
+18. Differentiate Between Deep Learning And Machine Learning?
+Deep Learning
+Machine Learning
+It is a subset of Machine Learning
+It is a superset of Deep Learning.
+It solves complex issues.
+It is used to learn new things.
+It is an evolution to Machine Learning.
+It is an evolution of AI.
+Here, algorithms are largely self-depicted on 
+the data analysis
+Algorithms are detected by the data analysts.
+19. Can You Name The Different Machine Learning Algorithms?
+Different machine learning algorithms are listed below:
+1.
+Decision trees,
+2.
+Naive Bayes,
+3.
+Random forest
+4.
+Support vector machine
+5.
+K-nearest neighbor,
+6.
+K-means clustering,
+7.
+Gaussian mixture model,
+8.
+Hidden Markov model etc.
+20. What Is AI?
+AI (Artificial intelligence) refers to the simulation of human intelligence in machines that are
+programmed to reflect like humans and imitate their actions.
+Examples: Face Detection and Recognition, Google Maps, and
+Ride-Hailing Applications, E-Payments.
+21. How To Select Important Variables While Working On A Data Set?
+1.
+You have to remove the correlated variables before selecting important variables.
+2.
+Make use of linear regression and select the variables based on their p values.
+3.
+Use Forward Selection, Stepwise Selection, and Backward Selection.
+4.
+Use Random Forest, Xgboost, and plot variable importance chart
+5.
+Use the Lasso Regression
+6.
+You have to select top n features by measuring the information gain for the available set
+of features.
+22. Differentiate Between Causality And Correlation?
+The Causality explicitly applies to the cases where action A causes the outcome of action B.
+Correlation can simply be defined as a relationship. Where the actions of  A can relate to the
+actions of B, but here it is not necessary for one event to cause the other event to happen.
+23. What Is Overfitting?
+Overfitting is a type of modeling error that results in the failure to predict or guess the future
+observations effectively or fit additional data in the model that already exists.
+24. Explain The Terms Standard Deviation And Variance?
+A standard dev
+... (truncated)
+
+--- FILE 2 ---
+Common Job Interview Questions and Answers
+1. Tell me about yourself.
+You'll encounter some version of this question in almost eve ry behavioral interview. This
+question is an opportunity for the interviewer to get to know you, your background, and
+what led you to apply for the position.
+Your interviewer has probably already read your resume. Whe n answering this question,
+don't feel the need to include every professional experienc e you've ever had. Instead, think
+about the most important experiences you'd like to highligh t and how the role you're
+interviewing for ﬁts in.
+"This question allows you to tell the interviewer things the y can't read on your resume," says
+Laura Mills, head of early career insights at Forage. "For in stance, you might share a lifelong
+passion that is interesting, and you can parlay it into an opp ortunity to introduce a
+characteristic, experience, or skill that shows motivatio n, perseverance, or a success factor."
+"Craft a compelling narrative, but only share the pivotal ch apters of your professional
+journey that led you to this moment," says Shahrukh Zahir, th e founder of Right Fit Advisors.
+You can frame your answer by talking about your professional past, present, and future to
+tell a cohesive story of your career experience.
+Mills shared an example with me of a candidate who answered th is question by talking
+about his experience playing hockey in college:
+  "I once had a candidate that shared how he was passionate abou t hockey, but when he got
+to college, found the club hockey team was suspended due to di sciplinary issues. He took
+the initiative to work with the administration and gain perm ission to reconstitute the team.
+He integrated this into his answer to this question by saying , 'I am passionate about hockey
+and am grateful to have been able to grow my leadership, motiv ation, and commitment
+through both high school and college hockey. Hockey has taug ht me discipline and
+teamwork and these skills have transferred to all other aspe cts of my work and personal
+life.'"
+
+2. Why did you apply for the job?
+"Mention what speciﬁcally attracted you to the job, such as t he company's mission, culture,
+or the responsibilities of the position," says Margaret Buj , principal recruiter at Mixmax.
+"Beyond surface appeal, this is where you showcase your alig nment with the company's
+ethos, mission, or the challenges they are trying to solve," Zahir says.
+Think about why you want this speciﬁc job, aside from the obvi ous beneﬁt of a paycheck. If
+the responsibilities for the role are exciting to you, pick a few to call out and explain why
+you'd enjoy doing them. If you're feeling stagnant in your cu rrent role and think this role will
+be more challenging, say so and explain why.
+Buj provided this example answer:
+"I applied for this job because I've been following [Company Name] for quite some time, and
+I'm genuinely impressed by the innovative solutions and gro undbreaking work you provide
+within the [industry]. Your company's reputation for pushi ng the boundaries in
+[industry-speciﬁc innovation or area] has consistently ca ught my attention.
+I am particularly drawn to [Company Name] because of your unw avering commitment to
+[speciﬁc aspect that aligns with your values]. In my career, I've always been passionate
+about [that speciﬁc aspect] because it's not just about the w ork; it's about making a
+meaningful impact. Your company's dedication to this align s perfectly with my own values
+and interests.
+What excites me most about this opportunity is the chance to c ontribute to [Company
+Name]'s mission. I believe that my background in [relevant s kills or experience] will enable
+me to make a signiﬁcant contribution to the continued succes s and growth of your team.
+I'm eager to be part of a company that is not only a leader in the industry but also a place
+where I can learn, grow, and help drive innovation in [indust ry]."
+
+3. What are your greatest strengths?
+"I'd want to hear where they are most comfortable and what the y really enjoy doing," says
+Amy Spurling, founder and CEO at Compt. "I want to hear what ma kes them happy to wake
+up and jump into things in the morning."
+"Highlight strengths that are relevant to the job and back th em up with speciﬁc examples
+from your previous experiences," says Buj.
+She provided this example answer:
+"One of my greatest strengths is my ability to analyze data an d derive actionable insights. In
+my previous role at [Previous Company], I led a project that i nvolved analyzing market
+trends, and my recommendations resulted in a 15% increase in sales within six months."
+4. What are your weaknesses?
+"Employers are trying to determine how you handle difﬁculty and challenges with this
+question. It is important to choose a real weakness to share, " says Mills.
+Mills suggests framing your answer to this question in the fo llowing way: name a weakness
+you have, explain the steps you have developed to mitigate it , and provide examples of how
+taking those steps has helped you improve in this area.
+5. Why do you think you’re qualiﬁed for the position?
+"When responding to this question, there's always going to b e a temptation to try and win
+the interview by demonstrating that you are the most compete nt candidate that is being
+interviewed," says Jeremy Grunfeld, director of student su ccess at Forage.
+"It's important for students to realize they can take the pre ssure off themselves. You do not
+need to be the most technically competent candidate to be the successful candidate," he
+continues.
+When recruiting for early-career roles, employers seek to r educe costs by hiring candidates
+who are likely to stay at the company for a longer time period, Grunfeld adds. Employers
+recognize that technical skills can be taught on the job. Eve n if you're not the most
+
+technically skilled candidate, if you can convey your authe ntic interest in the role, the
+company may be inclined to hire you.
+When answering this question, Grunfeld advises: "Demonstr ate that you are the most
+passionate person about the position and that you've taken t he time to learn about the
+skills required to succeed in that role."
+"I want to hear that they have done some research on the role an d company and where they
+think they would be able to have an impact," Spurling says.
+"Point out how your skills, experience, and qualiﬁcations a lign with the job requirements. Be
+speciﬁc," says Buj.
+Grunfeld provided this example answer:
+"Say your prior experience was at a bank, and now you're apply ing to Walmart. You might
+say that while you were building a particular product at the b ank, you got to see ﬁrsthand
+how you as a software engineer can build a product that has an i mpact on millions of
+people's lives. You now want to take that to Walmart, where yo u're not just impacting
+millions of people's lives but you're impacting their abili ty to feed their families.
+Demonstrate a connection between the prior experiences you 've had and how you are
+passionate about the organization and the role."
+Buj provided this example answer:
+"I believe I am well-qualiﬁed for this position because of my extensive and highly relevant
+experience. Over the course of [number of years] years, I've accumulated a deep expertise
+in working with [speciﬁc technology or skill] — a fundamenta l requirement for success in
+this role.
+In my previous positions, I've consistently demonstrated m y proﬁciency in [speciﬁc
+technology or skill]. For example, I successfully [mention a signiﬁcant achievement or
+project related to the technology or skill], where I [descri be the tasks or challenges you
+encountered and overcame]. This experience has not only sol idiﬁed my technical
+capabilities but has also equipped me with the ability to nav igate and innovate in this
+domain effectively.
+
+Furthermore, my role at [Previous Company] involved a range of responsibilities that are
+strikingly similar to what is expected in this position. For instance, I was responsible for
+[describe similar tasks or responsibilities], where I cons istently met or exceeded
+performance expectations. This experience has given me val uable insights into the
+intricacies of the role and has prepared me to excel in the cha llenges and opportunities it
+presents.
+I'm conﬁdent that my combination of hands-on experience, te chnical expertise, and my
+ability to adapt to similar responsibilities make me a stron g ﬁt for this position. I look
+forward to bringing this skill set to [Company Name] and cont ributing to its continued
+growth and success."
+6. What are your salary expectations?
+Your response should show you've researched the market rate for the role, according to
+Spurling.
+"If they can ask, 'What is your compensation philosophy and h ow have you determined the
+salary range for this role?' I will know they align with how we view compensation and pay
+equity within our organization," Spurling says.
+7. What motivates you?
+"A conﬁdent interviewee realizes that the interviewer just wants to get to know them for
+who they are," Grunfeld says. "The usual response from an int erviewee in this scenario is to
+try and answer by saying what they think the interviewer want s to hear. The best
+interviewees will be the ones who answer this question with a uthenticity."
+He gave this example answer:
+"If competition is what motivates you, you might tell the sto ry of how you once gave a
+rousing speech to motivate your team to win a state champions hip basketball game.
+This may not seem relevant to the role you're applying to, but it allows the interviewer to
+move to more informal questioning because they're interest ed in the story. You will then be
+able to follow up with more true and authentic stories."
+
+8. What are your reasons for leaving a job?
+"The general and sound advice is to articulate your motivati ons for leaving your current job,
+emphasizing the positive aspects for considering a move," s ays Karl Cremin, the co-founder
+and director of Talentspot Recruitment.
+"To really di
+... (truncated)

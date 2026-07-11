@@ -57,7 +57,7 @@ Please combine, refine, and summarize these two answers into a single, comprehen
                     "content": prompt,
                 }
             ],
-            model="llama-3.1-8b-instant",
+            model="qwen/qwen3-32b",
             temperature=0.3,
         )
         return chat_completion.choices[0].message.content
@@ -130,7 +130,7 @@ Context:
         # Allow up to 3 tool call iterations to support complex queries
         for iteration in range(3):
             response = await groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="qwen/qwen3-32b",
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
@@ -215,7 +215,7 @@ Do not include any conversational filler, just the answer.
                     "content": prompt,
                 }
             ],
-            model="llama-3.1-8b-instant",
+            model="qwen/qwen3-32b",
             temperature=0.3,
         )
         return chat_completion.choices[0].message.content.strip()
@@ -226,36 +226,121 @@ Do not include any conversational filler, just the answer.
 async def parse_pdf_text_to_qa(text: str) -> list:
     """
     Uses Groq LLM to extract Q&A pairs from raw text.
+    Processes text in chunks to handle multi-page PDFs.
     """
     if not groq_client:
         print("No Groq API key")
         return []
 
-    prompt = f"""
-You are an intelligent document parsing assistant. 
+    all_qa_pairs = []
+    chunk_size = 15000
+    
+    # Split text into chunks
+    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    
+    for chunk in chunks:
+        prompt = f"""
+You are an intelligent document parsing assistant for an Interview Preparation platform. 
 I have extracted the following text from a PDF document.
 
 Extract each question and its corresponding answer and return them as JSON.
+CRITICAL INSTRUCTION: You MUST ONLY extract questions and answers that are related to interviews, technical concepts, or professional skills. Ignore general knowledge, irrelevant content, or conversational filler.
 The JSON object MUST have a single key "qa_pairs" which is an array of objects.
 Each object in the array MUST have two keys: "question" and "answer".
-If you cannot find any questions or answers, return {{"qa_pairs": []}}.
+If you cannot find any relevant interview questions or answers, return {{"qa_pairs": []}}.
 
 Text:
-{text[:6000]}
+{chunk}
+"""
+        try:
+            chat_completion = await groq_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a JSON parsing assistant. You always output a valid JSON object."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                model="qwen/qwen3-32b",
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+            
+            response_text = chat_completion.choices[0].message.content.strip()
+            parsed = json.loads(response_text)
+            chunk_pairs = parsed.get("qa_pairs", [])
+            all_qa_pairs.extend(chunk_pairs)
+                
+        except Exception as e:
+            print(f"Error calling Groq API for chunk: {e}")
+            continue
+
+    return all_qa_pairs
+
+async def is_interview_related(text: str) -> bool:
+    """
+    Uses Groq LLM to quickly classify if the input text is related to interviews or professional skills.
+    """
+    if not groq_client:
+        return True # Fallback if no API key
+
+    prompt = f"""
+You are an AI classification system. You must determine if the following text is related to interview preparation, job interviews, technical concepts, or professional career skills.
+Respond with ONLY "YES" if it is related, or "NO" if it is general knowledge, inappropriate, or irrelevant.
+
+Text: "{text[:1000]}"
+"""
+    try:
+        chat_completion = await groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="qwen/qwen3-32b",
+            temperature=0.1,
+            max_tokens=10
+        )
+        response = chat_completion.choices[0].message.content.strip().upper()
+        return "YES" in response
+    except Exception as e:
+        print(f"Error calling Groq API for classification: {e}")
+        return True
+
+async def parse_image_to_qa(base64_image: str, mime_type: str) -> list:
+    """
+    Uses Groq's multimodal LLM to extract Q&A pairs from an image.
+    """
+    if not groq_client:
+        print("No Groq API key")
+        return []
+
+    prompt = """
+You are an intelligent document parsing assistant for an Interview Preparation platform. 
+I have uploaded an image (e.g., a screenshot, whiteboard, or slide).
+
+Extract each question and its corresponding answer and return them as JSON.
+CRITICAL INSTRUCTION: You MUST ONLY extract questions and answers that are related to interviews, technical concepts, or professional skills. Ignore general knowledge or irrelevant content.
+The JSON object MUST have a single key "qa_pairs" which is an array of objects.
+Each object in the array MUST have two keys: "question" and "answer".
+If you cannot find any relevant interview questions or answers, return {"qa_pairs": []}.
 """
     try:
         chat_completion = await groq_client.chat.completions.create(
             messages=[
                 {
-                    "role": "system",
-                    "content": "You are a JSON parsing assistant. You always output a valid JSON object."
-                },
-                {
                     "role": "user",
-                    "content": prompt,
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{base64_image}"
+                            }
+                        }
+                    ]
                 }
             ],
-            model="llama-3.1-8b-instant",
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             temperature=0.1,
             response_format={"type": "json_object"}
         )
@@ -265,5 +350,5 @@ Text:
         return parsed.get("qa_pairs", [])
             
     except Exception as e:
-        print(f"Error calling Groq API: {e}")
+        print(f"Error calling Groq Vision API: {e}")
         return []

@@ -2,6 +2,7 @@ import json
 import io
 import asyncio
 import PyPDF2
+import base64
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 import database
@@ -88,6 +89,9 @@ async def save_qa_logic(question: str, answer: str):
 
 @router.post("")
 async def add_qa(qa: QACreate):
+    is_valid = await rag.is_interview_related(qa.question + " " + qa.answer)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="This system only accepts interview-related questions and answers.")
     return await save_qa_logic(qa.question, qa.answer)
 
 @router.get("")
@@ -133,29 +137,50 @@ class QuestionQuery(BaseModel):
 async def generate_answer(query: QuestionQuery):
     if not query.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
+        
+    is_valid = await rag.is_interview_related(query.question)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="This system only answers interview-related questions.")
+        
     answer = await rag.generate_answer_for_question(query.question)
     return {"answer": answer}
 
-@router.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+@router.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    filename = file.filename.lower()
+    
+    if filename.endswith('.pdf'):
+        try:
+            content = await file.read()
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            text = ""
+            for page in pdf_reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text += extracted + "\n"
+                
+            if not text.strip():
+                raise HTTPException(status_code=400, detail="Could not extract text from PDF")
+                
+            qa_pairs = await rag.parse_pdf_text_to_qa(text)
+        except Exception as e:
+            print(f"PDF Parsing Error: {e}")
+            raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+            
+    elif filename.endswith(('.png', '.jpeg', '.jpg', '.webp')):
+        try:
+            content = await file.read()
+            base64_image = base64.b64encode(content).decode('utf-8')
+            mime_type = file.content_type
+            qa_pairs = await rag.parse_image_to_qa(base64_image, mime_type)
+        except Exception as e:
+            print(f"Image Parsing Error: {e}")
+            raise HTTPException(status_code=500, detail=f"Error processing Image: {str(e)}")
+            
+    else:
+        raise HTTPException(status_code=400, detail="Only PDF and Image files (PNG, JPEG, WebP) are supported")
     
     try:
-        content = await file.read()
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
-        text = ""
-        for page in pdf_reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-            
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="Could not extract text from PDF")
-            
-        # Parse text using Groq
-        qa_pairs = await rag.parse_pdf_text_to_qa(text)
-        
         if not qa_pairs:
             return {"message": "No Q&A pairs found in the document.", "added": 0}
             
@@ -164,13 +189,13 @@ async def upload_pdf(file: UploadFile = File(...)):
             q = pair.get("question")
             a = pair.get("answer")
             if q and a:
-                # Reuse the exact same duplicate/similarity logic from add_qa
-                await add_qa(QACreate(question=q, answer=a))
+                # We do not need to re-validate here because the LLM prompt already enforces it
+                await save_qa_logic(q, a)
                 added_count += 1
                 await asyncio.sleep(1.5)  # Add a slight delay to prevent HuggingFace API rate limits / connection drops
                 
         return {"message": f"Successfully extracted and saved {added_count} Q&A pairs.", "added": added_count}
         
     except Exception as e:
-        print(f"PDF Upload Error: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+        print(f"Upload Save Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error saving extracted Q&A: {str(e)}")
