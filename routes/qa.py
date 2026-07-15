@@ -3,8 +3,9 @@ import io
 import asyncio
 import PyPDF2
 import base64
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
+from auth import get_current_user
 import database
 import rag
 
@@ -14,7 +15,7 @@ class QACreate(BaseModel):
     question: str
     answer: str
 
-async def save_qa_logic(question: str, answer: str):
+async def save_qa_logic(question: str, answer: str, user_id: str):
     # 1. Embed the incoming question
     try:
         embedding = await rag.get_embedding(question)
@@ -41,7 +42,7 @@ async def save_qa_logic(question: str, answer: str):
             
             # Find the existing record in Supabase
             def query_supabase():
-                return database.supabase.table("qa_records").select("*").eq("id", int(similar_id)).execute()
+                return database.supabase.table("qa_records").select("*").eq("id", int(similar_id)).eq("user_id", user_id).execute()
             resp = await asyncio.to_thread(query_supabase)
             
             if resp.data:
@@ -68,7 +69,8 @@ async def save_qa_logic(question: str, answer: str):
     def insert_supabase():
         return database.supabase.table("qa_records").insert({
             "questions_json": json.dumps([question]),
-            "answer": answer
+            "answer": answer,
+            "user_id": user_id
         }).execute()
     new_record_resp = await asyncio.to_thread(insert_supabase)
     
@@ -80,7 +82,7 @@ async def save_qa_logic(question: str, answer: str):
             vectors=[{
                 "id": str(new_id),
                 "values": embedding,
-                "metadata": {"answer": answer}
+                "metadata": {"answer": answer, "user_id": user_id}
             }]
         )
     await asyncio.to_thread(upsert_pinecone)
@@ -88,16 +90,16 @@ async def save_qa_logic(question: str, answer: str):
     return {"message": "New Q&A added successfully.", "id": new_id}
 
 @router.post("")
-async def add_qa(qa: QACreate):
+async def add_qa(qa: QACreate, user_id: str = Depends(get_current_user)):
     is_valid = await rag.is_interview_related(qa.question + " " + qa.answer)
     if not is_valid:
         raise HTTPException(status_code=400, detail="This system only accepts interview-related questions and answers.")
-    return await save_qa_logic(qa.question, qa.answer)
+    return await save_qa_logic(qa.question, qa.answer, user_id)
 
 @router.get("")
-async def get_collection():
+async def get_collection(user_id: str = Depends(get_current_user)):
     def get_records():
-        return database.supabase.table("qa_records").select("*").execute()
+        return database.supabase.table("qa_records").select("*").eq("user_id", user_id).execute()
     resp = await asyncio.to_thread(get_records)
     records = []
     for r in resp.data:
@@ -110,10 +112,10 @@ async def get_collection():
     return records
 
 @router.delete("/{qa_id}")
-async def delete_qa(qa_id: int):
+async def delete_qa(qa_id: int, user_id: str = Depends(get_current_user)):
     # Delete from Supabase first
     def delete_supabase():
-        return database.supabase.table("qa_records").delete().eq("id", qa_id).execute()
+        return database.supabase.table("qa_records").delete().eq("id", qa_id).eq("user_id", user_id).execute()
     resp = await asyncio.to_thread(delete_supabase)
     
     if not resp.data:
@@ -134,7 +136,7 @@ class QuestionQuery(BaseModel):
     question: str
 
 @router.post("/generate-answer")
-async def generate_answer(query: QuestionQuery):
+async def generate_answer(query: QuestionQuery, user_id: str = Depends(get_current_user)):
     if not query.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
         
@@ -146,7 +148,7 @@ async def generate_answer(query: QuestionQuery):
     return {"answer": answer}
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), user_id: str = Depends(get_current_user)):
     filename = file.filename.lower()
     
     if filename.endswith('.pdf'):
@@ -190,7 +192,7 @@ async def upload_file(file: UploadFile = File(...)):
             a = pair.get("answer")
             if q and a:
                 # We do not need to re-validate here because the LLM prompt already enforces it
-                await save_qa_logic(q, a)
+                await save_qa_logic(q, a, user_id)
                 added_count += 1
                 await asyncio.sleep(1.5)  # Add a slight delay to prevent HuggingFace API rate limits / connection drops
                 

@@ -11,6 +11,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_community.tools import DuckDuckGoSearchRun
 from pydantic import BaseModel, Field
 
+from langchain_core.runnables import RunnableConfig
+
 import rag
 import database
 import logging
@@ -21,22 +23,23 @@ logger = logging.getLogger(__name__)
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     session_id: str
+    user_id: str
 
 # Tool for Pinecone RAG
 class SearchKnowledgeBaseInput(BaseModel):
     query: str = Field(description="The search query to look up in the user's saved knowledge base")
 
 @tool("search_knowledge_base", args_schema=SearchKnowledgeBaseInput)
-async def search_knowledge_base(query: str) -> str:
+async def search_knowledge_base(query: str, config: RunnableConfig) -> str:
     """Search the user's saved interview questions and answers to find relevant context."""
+    user_id = config.get("configurable", {}).get("user_id")
     try:
         embedding = await rag.get_embedding(query)
         def query_pinecone():
-            return rag.pinecone_index.query(vector=embedding, top_k=3, include_values=False)
+            return rag.pinecone_index.query(vector=embedding, top_k=3, filter={"user_id": {"$eq": user_id}}, include_values=False)
         results = await asyncio.to_thread(query_pinecone)
         retrieved_docs = []
-        
-        SIMILARITY_THRESHOLD = 0.70
+        SIMILARITY_THRESHOLD = 0.60
         
         if results and results.matches:
             for match in results.matches:
@@ -45,7 +48,7 @@ async def search_knowledge_base(query: str) -> str:
                     continue
                     
                 def query_supabase():
-                    return database.supabase.table("qa_records").select("*").eq("id", int(match.id)).execute()
+                    return database.supabase.table("qa_records").select("*").eq("id", int(match.id)).eq("user_id", user_id).execute()
                 resp = await asyncio.to_thread(query_supabase)
                 if resp.data:
                     r = resp.data[0]
@@ -73,11 +76,12 @@ class SaveUserFactInput(BaseModel):
     fact: str = Field(description="The important fact to save about the user")
 
 @tool("save_user_fact", args_schema=SaveUserFactInput)
-async def save_user_fact(fact: str) -> str:
+async def save_user_fact(fact: str, config: RunnableConfig) -> str:
     """Save an important fact about the user (e.g., their profession, skills, goals) to long-term memory."""
+    user_id = config.get("configurable", {}).get("user_id")
     try:
         def save_fact_to_db():
-            return database.supabase.table("user_facts").insert({"fact": fact}).execute()
+            return database.supabase.table("user_facts").insert({"fact": fact, "user_id": user_id}).execute()
         await asyncio.to_thread(save_fact_to_db)
         logger.info(f"Saved user fact: {fact}")
         return "Fact saved successfully."
@@ -85,11 +89,11 @@ async def save_user_fact(fact: str) -> str:
         logger.error(f"LTM Save Error: {e}", exc_info=True)
         return "Failed to save fact."
 
-async def get_user_facts() -> str:
+async def get_user_facts(user_id: str) -> str:
     """Retrieve all known facts about the user from long-term memory."""
     try:
         def get_facts_from_db():
-            return database.supabase.table("user_facts").select("fact").execute()
+            return database.supabase.table("user_facts").select("fact").eq("user_id", user_id).execute()
         resp = await asyncio.to_thread(get_facts_from_db)
         facts = [r["fact"] for r in resp.data]
         if facts:
@@ -120,11 +124,12 @@ class SaveQAInput(BaseModel):
     answer: str = Field(description="The comprehensive answer to save")
 
 @tool("save_qa_to_collection", args_schema=SaveQAInput)
-async def save_qa_to_collection(question: str, answer: str) -> str:
+async def save_qa_to_collection(question: str, answer: str, config: RunnableConfig) -> str:
     """Save an interview question and its comprehensive answer to the user's permanent collection."""
+    user_id = config.get("configurable", {}).get("user_id")
     try:
         from routes.qa import save_qa_logic
-        result = await save_qa_logic(question, answer)
+        result = await save_qa_logic(question, answer, user_id)
         logger.info(f"Saved Q&A to collection. ID: {result.get('id')}")
         return f"Successfully saved to collection: {result['message']}"
     except Exception as e:
@@ -146,9 +151,11 @@ def get_llm():
 tools = [search_knowledge_base, save_user_fact, search_web, save_qa_to_collection]
 
 # Node functions
-async def agent_node(state: AgentState):
+async def agent_node(state: AgentState, config: RunnableConfig = None):
+    config = config or {}
+    user_id = state.get("user_id") or config.get("configurable", {}).get("user_id")
     # Retrieve LTM to inject into context
-    ltm_context = await get_user_facts()
+    ltm_context = await get_user_facts(user_id)
     
     system_prompt = f"""You are an intelligent interview preparation assistant built for the Interview RAG platform.
 {ltm_context}
@@ -188,7 +195,7 @@ SAVING TO COLLECTION RULES:
     response = await llm_with_tools.ainvoke(messages)
     return {"messages": [response]}
 
-async def tool_node(state: AgentState):
+async def tool_node(state: AgentState, config: RunnableConfig = None):
     messages = state["messages"]
     last_message = messages[-1]
     
@@ -200,13 +207,13 @@ async def tool_node(state: AgentState):
             logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
             
             if tool_name == "search_knowledge_base":
-                result = await search_knowledge_base.ainvoke(tool_args)
+                result = await search_knowledge_base.ainvoke(tool_args, config=config)
             elif tool_name == "save_user_fact":
-                result = await save_user_fact.ainvoke(tool_args)
+                result = await save_user_fact.ainvoke(tool_args, config=config)
             elif tool_name == "search_web":
-                result = await search_web.ainvoke(tool_args)
+                result = await search_web.ainvoke(tool_args, config=config)
             elif tool_name == "save_qa_to_collection":
-                result = await save_qa_to_collection.ainvoke(tool_args)
+                result = await save_qa_to_collection.ainvoke(tool_args, config=config)
             else:
                 result = "Tool not found."
                 
@@ -214,7 +221,7 @@ async def tool_node(state: AgentState):
             
     return {"messages": tool_responses}
 
-def should_continue(state: AgentState):
+def should_continue(state: AgentState, config: RunnableConfig = None):
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         if any(tc["name"] == "save_qa_to_collection" for tc in last_message.tool_calls):

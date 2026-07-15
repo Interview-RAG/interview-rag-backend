@@ -19,3 +19,6 @@ langchain-openai
 langchain-community
 duckduckgo-search
 langchain-mistralai
+PyJWT
+bcrypt
+fastapi-mail

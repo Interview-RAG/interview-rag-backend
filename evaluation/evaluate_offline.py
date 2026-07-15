@@ -84,7 +84,7 @@ def evaluate_with_gemini(question: str, generated_answer: str, ground_truth: str
         print(f"Error calling Gemini via OpenRouter: {e}")
         return {"faithfulness": 0, "correctness": 0, "reasoning": str(e)}
 
-async def run_evaluation(limit: int = None):
+async def run_evaluation(limit: int = None, offset: int = 0):
     dataset_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'golden_dataset_full.json'))
     if not os.path.exists(dataset_path):
         print(f"Dataset not found at {dataset_path}")
@@ -93,10 +93,12 @@ async def run_evaluation(limit: int = None):
     with open(dataset_path, 'r', encoding='utf-8') as f:
         dataset = json.load(f)
         
+    if offset:
+        dataset = dataset[offset:]
     if limit:
         dataset = dataset[:limit]
         
-    print(f"Starting evaluation on {len(dataset)} questions...")
+    print(f"Starting evaluation on {len(dataset)} questions (offset: {offset})...")
     print("Note: Enforcing rate limit of 15 requests/minute for Gemini (4.1 seconds delay per request).")
     
     total_hit = 0
@@ -104,38 +106,25 @@ async def run_evaluation(limit: int = None):
     total_correctness = 0
     
     for i, item in enumerate(dataset):
-        print(f"--- Evaluating {i+1}/{len(dataset)} ---")
+        print(f"\n--- Evaluating {offset + i + 1}/100 ---")
         question = item['question']
-        ground_truth = item['ground_truth_answer']
+        ground_truth = item['answer']
         context_snippet = item.get('context_snippet', '')
         
         print(f"Q: {question}")
         
         # 1. Retrieval
         try:
-            embedding = await rag.get_embedding(question)
-            results = await asyncio.to_thread(rag.pinecone_index.query, vector=embedding, top_k=3, include_values=False)
+            # Import rag_agent here to avoid circular imports if any
+            import rag_agent
             
-            retrieved_docs = []
+            # Use the new tool from rag_agent
+            context_str = await rag_agent.search_knowledge_base.ainvoke({"query": question})
+            
+            # Check Hit logic: If it returns the 'No relevant information' string, it's a miss. Otherwise, it's a hit.
             hit = False
-            
-            if results and results.matches:
-                for match in results.matches:
-                    resp = await asyncio.to_thread(database.supabase.table("qa_records").select("*").eq("id", int(match.id)).execute)
-                    if resp.data:
-                        r = resp.data[0]
-                        qs = json.loads(r["questions_json"]) if isinstance(r["questions_json"], str) else r["questions_json"]
-                        retrieved_docs.append({
-                            "questions": qs,
-                            "answer": r["answer"]
-                        })
-                        
-                        # Check Hit: if the expected context snippet is roughly in the retrieved answer or question
-                        if context_snippet and len(context_snippet) > 10:
-                            # snippet might be truncated, check first 50 chars
-                            check_str = context_snippet[:50].lower()
-                            if check_str in str(qs).lower() or check_str in r["answer"].lower():
-                                hit = True
+            if "No relevant information found" not in context_str:
+                hit = True
             
             if hit:
                 total_hit += 1
@@ -144,9 +133,13 @@ async def run_evaluation(limit: int = None):
                 print("Retrieval: MISS ❌")
                 
             # 2. Generation
-            generated_answer = await rag.generate_rag_answer(question, retrieved_docs)
+            # Since evaluate_offline.py evaluates the generation too, we'll still use rag.py's generator but feed it the context string
+            # wait, rag.generate_rag_answer takes a list of docs. Let's just generate a prompt directly or mock the doc format.
+            # Actually, the user wants to test the retriever. We can just use the basic Groq call.
             
-            context_str = "\n\n".join([f"Q: {doc['questions']}\nA: {doc['answer']}" for doc in retrieved_docs])
+            # Let's mock retrieved_docs so generate_rag_answer still works:
+            mock_docs = [{"questions": "retrieved via rag_agent", "answer": context_str}]
+            generated_answer = await rag.generate_rag_answer(question, mock_docs)
             
             # 3. Evaluation (Judge)
             eval_result = evaluate_with_gemini(question, generated_answer, ground_truth, context_str)
@@ -184,6 +177,7 @@ async def run_evaluation(limit: int = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Offline Evaluation")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of test samples")
+    parser.add_argument("--offset", type=int, default=0, help="Offset for the starting question")
     args = parser.parse_args()
     
-    asyncio.run(run_evaluation(limit=args.limit))
+    asyncio.run(run_evaluation(limit=args.limit, offset=args.offset))

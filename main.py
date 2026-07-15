@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 from routes.qa import router as qa_router
 from routes.chat import router as chat_router
 from routes.pdf import router as pdf_router
+from routes.user import router as user_router
+from routes.auth_routes import router as auth_router
 
 app = FastAPI(title="Interview RAG API")
 
@@ -33,5 +35,7 @@ app.add_middleware(
 app.include_router(qa_router)
 app.include_router(chat_router)
 app.include_router(pdf_router)
+app.include_router(user_router)
+app.include_router(auth_router)
 
 logger.info("Interview RAG API has started successfully.")

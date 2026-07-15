@@ -1,9 +1,10 @@
 import json
 import logging
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from auth import get_current_user
 import database
 import rag
 from rag_agent import app_graph
@@ -22,39 +23,39 @@ class SessionRename(BaseModel):
     title: str
 
 @router.get("/sessions")
-async def get_sessions():
+async def get_sessions(user_id: str = Depends(get_current_user)):
     def fetch_sessions():
-        return database.supabase.table("chat_sessions").select("*").order("created_at", desc=True).execute()
+        return database.supabase.table("chat_sessions").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     resp = await asyncio.to_thread(fetch_sessions)
     return resp.data
 
 @router.post("/sessions")
-async def create_session(session: SessionCreate):
+async def create_session(session: SessionCreate, user_id: str = Depends(get_current_user)):
     def insert_session():
-        return database.supabase.table("chat_sessions").insert({"title": session.title}).execute()
+        return database.supabase.table("chat_sessions").insert({"title": session.title, "user_id": user_id}).execute()
     resp = await asyncio.to_thread(insert_session)
     return resp.data[0]
 
 @router.put("/sessions/{session_id}")
-async def rename_session(session_id: str, session: SessionRename):
+async def rename_session(session_id: str, session: SessionRename, user_id: str = Depends(get_current_user)):
     def update_session():
-        return database.supabase.table("chat_sessions").update({"title": session.title}).eq("id", session_id).execute()
+        return database.supabase.table("chat_sessions").update({"title": session.title}).eq("id", session_id).eq("user_id", user_id).execute()
     resp = await asyncio.to_thread(update_session)
     if not resp.data:
         raise HTTPException(status_code=404, detail="Session not found")
     return resp.data[0]
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, user_id: str = Depends(get_current_user)):
     def run_delete():
-        return database.supabase.table("chat_sessions").delete().eq("id", session_id).execute()
+        return database.supabase.table("chat_sessions").delete().eq("id", session_id).eq("user_id", user_id).execute()
     await asyncio.to_thread(run_delete)
     return {"message": "Session deleted"}
 
 @router.get("/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str):
+async def get_session_messages(session_id: str, user_id: str = Depends(get_current_user)):
     def fetch_messages():
-        return database.supabase.table("chat_messages").select("*").eq("session_id", session_id).order("created_at").execute()
+        return database.supabase.table("chat_messages").select("*").eq("session_id", session_id).eq("user_id", user_id).order("created_at").execute()
     resp = await asyncio.to_thread(fetch_messages)
     return resp.data
 
@@ -65,7 +66,14 @@ class ChatQuery(BaseModel):
     session_id: str
 
 @router.post("")
-async def chat_with_rag(query: ChatQuery):
+async def chat_with_rag(query: ChatQuery, user_id: str = Depends(get_current_user)):
+    # Verify session ownership first
+    def check_session():
+        return database.supabase.table("chat_sessions").select("id").eq("id", query.session_id).eq("user_id", user_id).execute()
+    session_check = await asyncio.to_thread(check_session)
+    if not session_check.data:
+        raise HTTPException(status_code=403, detail="Not authorized to access this session")
+
     # 1. Fetch history from DB
     def fetch_msgs():
         return database.supabase.table("chat_messages").select("*").eq("session_id", query.session_id).order("created_at").execute()
@@ -104,7 +112,8 @@ async def chat_with_rag(query: ChatQuery):
         return database.supabase.table("chat_messages").insert({
             "session_id": query.session_id,
             "role": "user",
-            "content": query.query
+            "content": query.query,
+            "user_id": user_id
         }).execute()
     await asyncio.to_thread(insert_user_msg)
     
@@ -112,7 +121,7 @@ async def chat_with_rag(query: ChatQuery):
     logger.info(f"Streaming agent for session {query.session_id} with query: {query.query}")
     
     async def event_stream():
-        config = {"configurable": {"thread_id": query.session_id}}
+        config = {"configurable": {"thread_id": query.session_id, "user_id": user_id}}
         
         if session_title:
             yield f"data: {json.dumps({'type': 'session_title', 'title': session_title})}\n\n"
@@ -170,7 +179,8 @@ async def chat_with_rag(query: ChatQuery):
                 return database.supabase.table("chat_messages").insert({
                     "session_id": query.session_id,
                     "role": "ai",
-                    "content": answer
+                    "content": answer,
+                    "user_id": user_id
                 }).execute()
             await asyncio.to_thread(insert_ai_msg)
             
@@ -194,8 +204,8 @@ class ApproveSaveRequest(BaseModel):
     approvals: list[ApprovalItem]
 
 @router.post("/approve-save")
-async def approve_save(req: ApproveSaveRequest):
-    config = {"configurable": {"thread_id": req.session_id}}
+async def approve_save(req: ApproveSaveRequest, user_id: str = Depends(get_current_user)):
+    config = {"configurable": {"thread_id": req.session_id, "user_id": user_id}}
     state_snapshot = app_graph.get_state(config)
     
     if not state_snapshot.next or "sensitive_tools" not in state_snapshot.next:
@@ -244,7 +254,8 @@ async def approve_save(req: ApproveSaveRequest):
         return database.supabase.table("chat_messages").insert({
             "session_id": req.session_id,
             "role": "ai",
-            "content": final_message.content
+            "content": final_message.content,
+            "user_id": user_id
         }).execute()
     await asyncio.to_thread(insert_final_msg)
     
