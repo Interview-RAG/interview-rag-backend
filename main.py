@@ -16,6 +16,7 @@ from routes.chat import router as chat_router
 from routes.pdf import router as pdf_router
 from routes.user import router as user_router
 from routes.auth_routes import router as auth_router
+from routes.resume import router as resume_router
 
 app = FastAPI(title="PrepAI API")
 
@@ -37,5 +38,6 @@ app.include_router(chat_router)
 app.include_router(pdf_router)
 app.include_router(user_router)
 app.include_router(auth_router)
+app.include_router(resume_router)
 
 logger.info("PrepAI API has started successfully.")
