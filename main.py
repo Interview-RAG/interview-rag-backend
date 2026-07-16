@@ -17,7 +17,7 @@ from routes.pdf import router as pdf_router
 from routes.user import router as user_router
 from routes.auth_routes import router as auth_router
 
-app = FastAPI(title="Interview RAG API")
+app = FastAPI(title="PrepAI API")
 
 # Setup CORS for the React frontend
 app.add_middleware(
@@ -38,4 +38,4 @@ app.include_router(pdf_router)
 app.include_router(user_router)
 app.include_router(auth_router)
 
-logger.info("Interview RAG API has started successfully.")
+logger.info("PrepAI API has started successfully.")
