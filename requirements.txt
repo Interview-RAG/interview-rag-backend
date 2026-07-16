@@ -22,3 +22,4 @@ langchain-mistralai
 PyJWT
 bcrypt
 fastapi-mail
+PyMuPDF
