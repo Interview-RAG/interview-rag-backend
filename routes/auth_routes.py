@@ -63,6 +63,14 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    otp: str
+    new_password: str
+
 # --- Helper to generate OTP ---
 def generate_otp() -> str:
     return str(random.randint(100000, 999999))
@@ -243,3 +251,77 @@ async def resend_otp(req: SignupRequest):
         raise HTTPException(status_code=500, detail="Failed to send verification email.")
 
     return {"message": "A new verification code has been sent to your email."}
+
+@router.post("/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest):
+    """Generate OTP for password reset and send email."""
+    email = req.email.lower().strip()
+
+    def check_existing():
+        return database.supabase.table("users").select("id").eq("email", email).eq("is_verified", True).execute()
+    existing = await asyncio.to_thread(check_existing)
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="No verified account found with this email.")
+
+    otp = generate_otp()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+
+    def upsert_otp():
+        return database.supabase.table("otp_codes").upsert(
+            {"email": email, "otp": otp, "expires_at": expires_at},
+            on_conflict="email"
+        ).execute()
+    await asyncio.to_thread(upsert_otp)
+
+    try:
+        message = MessageSchema(
+            subject="InterviewRAG - Password Reset",
+            recipients=[email],
+            body=f"""
+            <h2>InterviewRAG Password Reset</h2>
+            <p>Your password reset code is:</p>
+            <h1 style="letter-spacing: 8px; color: #238636; font-size: 36px;">{otp}</h1>
+            <p>This code expires in <b>10 minutes</b>.</p>
+            """,
+            subtype=MessageType.html,
+        )
+        await fast_mail.send_message(message)
+    except Exception as e:
+        logger.error(f"Failed to send password reset email: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to send reset email.")
+
+    return {"message": "Password reset code has been sent to your email."}
+
+@router.post("/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    """Verify OTP and update user's password."""
+    email = req.email.lower().strip()
+
+    def fetch_otp():
+        return database.supabase.table("otp_codes").select("*").eq("email", email).execute()
+    otp_data = await asyncio.to_thread(fetch_otp)
+
+    if not otp_data.data:
+        raise HTTPException(status_code=400, detail="No active reset request found for this email.")
+
+    record = otp_data.data[0]
+    if record["otp"] != req.otp:
+        raise HTTPException(status_code=400, detail="Invalid reset code.")
+
+    expires_at = datetime.fromisoformat(record["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="Reset code has expired. Please request a new one.")
+
+    hashed_password = hash_password(req.new_password)
+
+    def update_password():
+        return database.supabase.table("users").update(
+            {"hashed_password": hashed_password}
+        ).eq("email", email).execute()
+    await asyncio.to_thread(update_password)
+
+    def delete_otp():
+        return database.supabase.table("otp_codes").delete().eq("email", email).execute()
+    await asyncio.to_thread(delete_otp)
+
+    return {"message": "Password successfully reset."}
