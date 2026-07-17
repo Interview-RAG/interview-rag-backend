@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 import bcrypt
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 
 import database
 
@@ -35,19 +35,35 @@ def create_access_token(user_id: str, email: str) -> str:
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
-# --- Email Configuration ---
-mail_port = int(os.getenv("MAIL_PORT", 587))
-mail_conf = ConnectionConfig(
-    MAIL_USERNAME=os.getenv("MAIL_USERNAME", ""),
-    MAIL_PASSWORD=os.getenv("MAIL_PASSWORD", ""),
-    MAIL_FROM=os.getenv("MAIL_FROM", os.getenv("MAIL_USERNAME", "noreply@example.com")),
-    MAIL_PORT=mail_port,
-    MAIL_SERVER=os.getenv("MAIL_SERVER", "smtp.gmail.com"),
-    MAIL_STARTTLS=os.getenv("MAIL_STARTTLS", str(mail_port == 587)).lower() in ("true", "1", "t"),
-    MAIL_SSL_TLS=os.getenv("MAIL_SSL_TLS", str(mail_port == 465)).lower() in ("true", "1", "t"),
-    USE_CREDENTIALS=True,
-)
-fast_mail = FastMail(mail_conf)
+# --- Brevo (Sendinblue) Email Configuration ---
+# Uses HTTPS API — works on Render/Vercel free tiers (no SMTP ports needed)
+# Only requires sender email verification, NOT domain verification
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
+MAIL_FROM = os.getenv("MAIL_FROM", "arshidtm2001@gmail.com")
+MAIL_FROM_NAME = os.getenv("MAIL_FROM_NAME", "PrepAI")
+
+async def send_email(to: str, subject: str, html_body: str):
+    """Send an email using Brevo's HTTP API."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "api-key": BREVO_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            json={
+                "sender": {"name": MAIL_FROM_NAME, "email": MAIL_FROM},
+                "to": [{"email": to}],
+                "subject": subject,
+                "htmlContent": html_body,
+            },
+            timeout=30.0,
+        )
+        if response.status_code not in (200, 201):
+            logger.error(f"Brevo API error: {response.status_code} - {response.text}")
+            raise Exception(f"Brevo API returned {response.status_code}: {response.text}")
+        return response.json()
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -113,23 +129,21 @@ async def signup(req: SignupRequest):
 
     # Send OTP email
     try:
-        message = MessageSchema(
-            subject="InterviewRAG - Verify Your Email",
-            recipients=[email],
-            body=f"""
-            <h2>Welcome to InterviewRAG!</h2>
+        await send_email(
+            to=email,
+            subject="PrepAI - Verify Your Email",
+            html_body=f"""
+            <h2>Welcome to PrepAI!</h2>
             <p>Your verification code is:</p>
             <h1 style="letter-spacing: 8px; color: #238636; font-size: 36px;">{otp}</h1>
             <p>This code expires in <b>10 minutes</b>.</p>
             <p>If you did not request this, you can safely ignore this email.</p>
             """,
-            subtype=MessageType.html,
         )
-        await fast_mail.send_message(message)
         logger.info(f"OTP email sent to {email}")
     except Exception as e:
         logger.error(f"Failed to send OTP email: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to send verification email. Please check SMTP configuration.")
+        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again later.")
 
     return {"message": "Verification code sent to your email."}
 
@@ -234,18 +248,16 @@ async def resend_otp(req: SignupRequest):
     await asyncio.to_thread(upsert_otp)
 
     try:
-        message = MessageSchema(
-            subject="InterviewRAG - Your New Verification Code",
-            recipients=[email],
-            body=f"""
-            <h2>InterviewRAG Verification</h2>
+        await send_email(
+            to=email,
+            subject="PrepAI - Your New Verification Code",
+            html_body=f"""
+            <h2>PrepAI Verification</h2>
             <p>Your new verification code is:</p>
             <h1 style="letter-spacing: 8px; color: #238636; font-size: 36px;">{otp}</h1>
             <p>This code expires in <b>10 minutes</b>.</p>
             """,
-            subtype=MessageType.html,
         )
-        await fast_mail.send_message(message)
         logger.info(f"Resent OTP email to {email}")
     except Exception as e:
         logger.error(f"Failed to resend OTP email: {e}", exc_info=True)
@@ -275,18 +287,16 @@ async def forgot_password(req: ForgotPasswordRequest):
     await asyncio.to_thread(upsert_otp)
 
     try:
-        message = MessageSchema(
-            subject="InterviewRAG - Password Reset",
-            recipients=[email],
-            body=f"""
-            <h2>InterviewRAG Password Reset</h2>
+        await send_email(
+            to=email,
+            subject="PrepAI - Password Reset",
+            html_body=f"""
+            <h2>PrepAI Password Reset</h2>
             <p>Your password reset code is:</p>
             <h1 style="letter-spacing: 8px; color: #238636; font-size: 36px;">{otp}</h1>
             <p>This code expires in <b>10 minutes</b>.</p>
             """,
-            subtype=MessageType.html,
         )
-        await fast_mail.send_message(message)
     except Exception as e:
         logger.error(f"Failed to send password reset email: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to send reset email.")
