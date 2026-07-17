@@ -22,4 +22,5 @@ langchain-mistralai
 PyJWT
 bcrypt
 httpx
+email-validator
 PyMuPDF
