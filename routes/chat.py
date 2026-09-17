@@ -64,6 +64,10 @@ async def get_session_messages(session_id: str, user_id: str = Depends(get_curre
 class ChatQuery(BaseModel):
     query: str
     session_id: str
+    # Coach answers and critiques; mock interview asks one question at a time;
+    # pressure test interrogates a project from the resume.
+    mode: str = "coach"
+    project: str | None = None
 
 @router.post("")
 async def chat_with_rag(query: ChatQuery, user_id: str = Depends(get_current_user)):
@@ -121,7 +125,19 @@ async def chat_with_rag(query: ChatQuery, user_id: str = Depends(get_current_use
     logger.info(f"Streaming agent for session {query.session_id} with query: {query.query}")
     
     async def event_stream():
-        config = {"configurable": {"thread_id": query.session_id, "user_id": user_id}}
+        mode = query.mode if query.mode in ("coach", "mock", "pressure", "jobs") else "coach"
+        config = {
+            "configurable": {
+                "thread_id": query.session_id,
+                "user_id": user_id,
+                "mode": mode,
+                "project": query.project
+            },
+            # LangGraph defaults to 25, which is ~12 agent/tool round trips —
+            # enough for a model to thrash on an unsatisfiable search and burn
+            # a dozen LLM calls. Six round trips is plenty for any real answer.
+            "recursion_limit": 12,
+        }
         
         if session_title:
             yield f"data: {json.dumps({'type': 'session_title', 'title': session_title})}\n\n"
@@ -171,8 +187,25 @@ async def chat_with_rag(query: ChatQuery, user_id: str = Depends(get_current_use
                         return
                         
             # 7. Normal completion
-            final_message = state_snapshot.values["messages"][-1]
-            answer = final_message.content
+            #
+            # The model often writes prose in the same turn it calls a tool, then
+            # more prose after the result comes back. Taking only messages[-1]
+            # silently dropped everything but the last chunk — a job search could
+            # return "here is how these fit you" with the actual listings gone.
+            # Gather every assistant message since the user's turn instead.
+            history = state_snapshot.values["messages"]
+            parts = []
+            for msg in reversed(history):
+                if isinstance(msg, HumanMessage):
+                    break
+                if isinstance(msg, AIMessage):
+                    text = msg.content.strip() if isinstance(msg.content, str) else ""
+                    if text and text not in parts:
+                        parts.append(text)
+            answer = "\n\n".join(reversed(parts))
+            if not answer:
+                last = history[-1].content if history else ""
+                answer = last if isinstance(last, str) else ""
             
             # 8. Save AI message to DB
             def insert_ai_msg():
@@ -226,7 +259,7 @@ async def approve_save(req: ApproveSaveRequest, user_id: str = Depends(get_curre
             item = approval_map.get(tc["id"])
             if item and item.approved:
                 try:
-                    result = await save_qa_logic(item.question, item.answer)
+                    result = await save_qa_logic(item.question, item.answer, user_id)
                     msg = f"Successfully saved to collection: {result['message']}"
                     logger.info(f"User approved save for {tc['id']}")
                 except Exception as e:

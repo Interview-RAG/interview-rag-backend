@@ -1,10 +1,11 @@
 from fpdf import FPDF
-import os
+import textwrap
+
 
 class PDF(FPDF):
     def header(self):
         self.set_font("Arial", "B", 15)
-        self.cell(0, 10, "Interview Preparation Q&A Collection", 0, 1, "C")
+        self.cell(0, 10, "PrepAI Study Guide", 0, 1, "C")
         self.ln(10)
 
     def footer(self):
@@ -12,45 +13,56 @@ class PDF(FPDF):
         self.set_font("Arial", "I", 8)
         self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
 
-import textwrap
 
-def generate_pdf(qa_list, output_path="collection.pdf"):
+def _latin1(text):
+    """fpdf's core fonts are latin-1 only; drop what will not encode."""
+    return str(text).encode("latin-1", "replace").decode("latin-1")
+
+
+def _write_wrapped(pdf, text, width, indent=None):
+    for orig_line in _latin1(text).split("\n"):
+        wrapped = textwrap.wrap(orig_line, width=width)
+        if not wrapped:
+            pdf.ln(7)
+        for line in wrapped:
+            if indent is not None:
+                pdf.set_x(indent)
+            pdf.cell(0, 7, txt=line, ln=1)
+
+
+def generate_pdf(sections, output_path="collection.pdf"):
+    """`sections` is [{"tag": str, "items": [{"questions": [...], "answer": str}]}].
+
+    A plain list of Q&A pairs is also accepted, and prints as one untitled run.
+    """
+    if sections and "tag" not in sections[0]:
+        sections = [{"tag": None, "items": sections}]
+
     pdf = PDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
 
-    for index, qa in enumerate(qa_list, start=1):
-        questions = qa.get("questions", [])
-        primary_question = questions[0] if questions else "Question?"
-        
-        # Format and encode question
-        pdf.set_font("Arial", "B", 12)
-        question_text = f"{index}. {primary_question}"
-        question_text = question_text.encode('latin-1', 'replace').decode('latin-1')
-        
-        # Safely wrap and print question lines
-        for orig_line in question_text.split('\n'):
-            wrapped_q = textwrap.wrap(orig_line, width=90)
-            if not wrapped_q:
-                pdf.ln(7)
-            for line in wrapped_q:
-                pdf.cell(0, 7, txt=line, ln=1)
-        
-        # Format and encode answer
-        pdf.set_font("Arial", "", 12)
-        answer_text = f"==> {qa.get('answer', '')}"
-        answer_text = answer_text.encode('latin-1', 'replace').decode('latin-1')
-        
-        # Safely wrap and print answer lines with indentation
-        for orig_line in answer_text.split('\n'):
-            wrapped_a = textwrap.wrap(orig_line, width=85)
-            if not wrapped_a:
-                pdf.ln(7)
-            for line in wrapped_a:
-                pdf.set_x(20) # Indent the answer
-                pdf.cell(0, 7, txt=line, ln=1)
-        
-        pdf.ln(8) # Space between QA pairs
+    for section in sections:
+        tag = section.get("tag")
+        if tag:
+            pdf.set_font("Arial", "B", 14)
+            pdf.ln(2)
+            pdf.cell(0, 9, txt=_latin1(tag.upper()), ln=1)
+            pdf.set_draw_color(180, 180, 180)
+            pdf.line(pdf.get_x(), pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(4)
+
+        for index, qa in enumerate(section.get("items") or [], start=1):
+            questions = qa.get("questions") or []
+            primary_question = questions[0] if questions else "Question?"
+
+            pdf.set_font("Arial", "B", 12)
+            _write_wrapped(pdf, f"{index}. {primary_question}", width=90)
+
+            pdf.set_font("Arial", "", 12)
+            _write_wrapped(pdf, f"==> {qa.get('answer', '')}", width=85, indent=20)
+
+            pdf.ln(8)
 
     pdf.output(output_path)
     return output_path

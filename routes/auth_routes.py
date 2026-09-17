@@ -22,8 +22,9 @@ def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 # --- JWT Configuration ---
-JWT_SECRET = os.getenv("JWT_SECRET", "change-me-to-a-strong-random-secret")
-JWT_ALGORITHM = "HS256"
+# Imported from auth so the signer can never diverge from the verifier the
+# way it did when each read the environment independently.
+from auth import JWT_SECRET, JWT_ALGORITHM  # noqa: E402
 JWT_EXPIRATION_HOURS = 24
 
 def create_access_token(user_id: str, email: str) -> str:
