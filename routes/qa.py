@@ -46,10 +46,18 @@ async def save_qa_logic(question: str, answer: str, user_id: str, tags: list[str
         print(f"Embedding error: {e}")
         raise HTTPException(status_code=500, detail="Failed to embed question.")
         
-    # 2. Search for similar questions in Pinecone
+    # 2. Search for similar questions in Pinecone — scoped to this user.
+    # Without the filter the top hit can be another user's vector; the Supabase
+    # lookup below is user-scoped so nothing leaked, but it came back empty and
+    # a duplicate was inserted instead of merged. Same filter search_knowledge_base uses.
     try:
         def query_pinecone():
-            return rag.pinecone_index.query(vector=embedding, top_k=1, include_metadata=True)
+            return rag.pinecone_index.query(
+                vector=embedding,
+                top_k=1,
+                include_metadata=True,
+                filter={"user_id": {"$eq": user_id}},
+            )
         results = await asyncio.to_thread(query_pinecone)
     except Exception as e:
         print(f"Pinecone search error: {e}")
