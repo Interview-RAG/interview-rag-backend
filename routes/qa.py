@@ -3,19 +3,19 @@ import io
 import asyncio
 import PyPDF2
 import base64
-import re
 from datetime import date
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from auth import get_current_user
 import database
 import rag
-import models_config
+import llm
 
 router = APIRouter(prefix="/api/qa", tags=["qa"])
 
-# Shown when Groq is saturated. Deliberately distinct from "nothing found",
-# which previously came back for both cases and read as an empty document.
+# Shown when every LLM provider is saturated. Deliberately distinct from
+# "nothing found", which previously came back for both cases and read as an
+# empty document.
 BUSY_DETAIL = ("The extraction model is over capacity right now. "
                "Please try again in a minute.")
 
@@ -256,7 +256,7 @@ async def draft_star(query: QuestionQuery, user_id: str = Depends(get_current_us
     """Draft a STAR answer grounded in the user's parsed resume."""
     if not query.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
-    if not rag.groq_client:
+    if not llm.is_configured():
         raise HTTPException(status_code=503, detail="Drafting is unavailable")
 
     def get_resume():
@@ -288,13 +288,12 @@ async def draft_star(query: QuestionQuery, user_id: str = Depends(get_current_us
     )
 
     try:
-        completion = await rag.groq_client.chat.completions.create(
+        completion = await llm.chat(
+            "heavy",
             messages=[{"role": "user", "content": prompt}],
-            model=models_config.TEXT_MODEL,
             temperature=0.4
         )
-        answer = completion.choices[0].message.content or ""
-        answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
+        answer = (completion.choices[0].message.content or "").strip()
     except Exception as e:
         print(f"STAR draft failed: {e}")
         raise HTTPException(status_code=502, detail="Could not draft an answer")
@@ -308,7 +307,7 @@ async def suggest_tags(query: QuestionQuery, user_id: str = Depends(get_current_
     """Two or three topic tags for a question, reusing the user's existing tags."""
     if not query.question.strip():
         return {"tags": []}
-    if not rag.groq_client:
+    if not llm.is_configured():
         return {"tags": []}
 
     def existing():
@@ -326,16 +325,16 @@ async def suggest_tags(query: QuestionQuery, user_id: str = Depends(get_current_
     )
 
     try:
-        completion = await rag.groq_client.chat.completions.create(
+        completion = await llm.chat(
+            "fast",
             messages=[{"role": "user", "content": prompt}],
-            model=models_config.FAST_MODEL,
             temperature=0.3,
+            reasoning_effort="none",
             response_format={"type": "json_object"}
         )
-        raw = completion.choices[0].message.content or "{}"
-        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-        data = json.loads(raw.strip())
-        return {"tags": clean_tags([t for t in (data.get("tags") or []) if isinstance(t, str)])}
+        data = llm.parse_json(completion.choices[0].message.content or "{}")
+        tags = data.get("tags") if isinstance(data, dict) else []
+        return {"tags": clean_tags([t for t in (tags or []) if isinstance(t, str)])}
     except Exception as e:
         print(f"Tag suggestion failed: {e}")
         return {"tags": []}
@@ -393,10 +392,12 @@ async def upload_file(file: UploadFile = File(...), user_id: str = Depends(get_c
             a = pair.get("answer")
             if q and a:
                 # We do not need to re-validate here because the LLM prompt already enforces it
+                # No pause needed between saves: embeddings come from Pinecone,
+                # and the only LLM call in save_qa_logic (combine_answers) is
+                # already throttled by the router.
                 await save_qa_logic(q, a, user_id)
                 added_count += 1
-                await asyncio.sleep(1.5)  # Add a slight delay to prevent HuggingFace API rate limits / connection drops
-                
+
         return {"message": f"Successfully extracted and saved {added_count} Q&A pairs.", "added": added_count}
         
     except Exception as e:

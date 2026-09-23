@@ -3,7 +3,7 @@ uvicorn
 pydantic
 python-dotenv
 requests
-groq
+openai
 fpdf2
 ddgs
 pinecone
@@ -11,16 +11,20 @@ supabase
 PyPDF2
 python-multipart
 langgraph
-langchain-groq
 langchain-core
 langsmith
-langchain-google-genai
 langchain-openai
 langchain-community
 duckduckgo-search
-langchain-mistralai
 PyJWT
 bcrypt
 httpx
 email-validator
 PyMuPDF
+
+# evaluation/evaluate_offline.py only
+google-genai
+
+# dev
+pytest
+pytest-asyncio

@@ -28,7 +28,7 @@ async def ingest_pdf(filepath):
         print(f"Could not extract any text from {filepath}")
         return
 
-    print("Parsing text to Q&A pairs via Groq (this may take a minute for large files)...")
+    print("Parsing text to Q&A pairs via the LLM router (this may take a minute for large files)...")
     qa_pairs = await rag.parse_pdf_text_to_qa(text)
     
     if not qa_pairs:

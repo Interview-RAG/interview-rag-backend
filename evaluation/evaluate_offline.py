@@ -159,10 +159,10 @@ async def run_evaluation(limit: int = None, offset: int = 0):
             
         print("-" * 40)
         
-        # Strict rate limit: 10 requests per minute = 1 request every 6 seconds
-        # Sleep for 6 seconds before the next iteration
-        # Rate limiting (Gemini free tier is ~15 RPM max)
-        time.sleep(4.1)
+        # Gemini Flash free tier is 10 requests per minute (2026-09), so one
+        # request every 6 seconds. This script shares the project's quota
+        # with the running backend's gemini-flash deployment.
+        time.sleep(6.1)
             
     # Final Report
     print("\n" + "="*40)

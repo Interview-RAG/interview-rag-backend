@@ -1,6 +1,5 @@
 import json
 import asyncio
-import re
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -8,8 +7,7 @@ from pydantic import BaseModel
 
 from auth import get_current_user
 import database
-import rag
-import models_config
+import llm
 
 router = APIRouter(prefix="/api/practice", tags=["practice"])
 
@@ -141,7 +139,7 @@ async def grade_answer(
     """Score a typed answer against the saved one: 0-10 plus what was missed."""
     if not body.typed_answer.strip():
         raise HTTPException(status_code=400, detail="Answer is empty")
-    if not rag.groq_client:
+    if not llm.is_configured():
         raise HTTPException(status_code=503, detail="Grading is unavailable")
 
     def fetch():
@@ -176,17 +174,17 @@ async def grade_answer(
     )
 
     try:
-        completion = await rag.groq_client.chat.completions.create(
+        completion = await llm.chat(
+            "heavy",
             messages=[{"role": "user", "content": prompt}],
-            model=models_config.TEXT_MODEL,
             temperature=0.2,
+            reasoning_effort="none",
             response_format={"type": "json_object"},
         )
-        raw = completion.choices[0].message.content
-        # qwen can wrap its reply in <think> blocks or fences.
-        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-        raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE)
-        data = json.loads(raw.strip())
+        # parse_json copes with <think> blocks and fences from any provider.
+        data = llm.parse_json(completion.choices[0].message.content)
+        if not isinstance(data, dict):
+            raise ValueError("grader returned a non-object")
     except Exception as e:
         print(f"Grading failed: {e}")
         raise HTTPException(status_code=502, detail="Could not grade that answer")

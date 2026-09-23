@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from auth import get_current_user
 import database
 import rag
+import llm
 from rag_agent import app_graph
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
@@ -22,12 +23,74 @@ class SessionCreate(BaseModel):
 class SessionRename(BaseModel):
     title: str
 
+GENERIC_ERROR = "Sorry, I encountered an error answering your question."
+PROVIDER_CREDITS_ERROR = (
+    "The AI provider has run out of credits, so the coach can't reply right now. "
+    "This needs the administrator to top up the provider account — nothing on your side."
+)
+PROVIDER_BUSY_ERROR = (
+    "The AI coach is temporarily over its free usage limits. "
+    "Please try again in a minute."
+)
+
+
+def user_facing_error(exc: Exception) -> str:
+    """Turn an agent failure into something the chat bubble can show honestly.
+
+    A 402 from a provider is not a transient glitch: the account has no credits
+    and *every* turn will fail until someone adds some. Saying so beats a
+    generic apology that leaves the user retrying and the operator guessing —
+    every turn 402'd for days behind the same "Sorry, I encountered an error"
+    text before this was noticed (2026-09-23).
+
+    LLMUnavailable means every configured provider is rate-limited or cooling
+    down right now; that one *is* transient, so say so.
+    """
+    if isinstance(exc, llm.LLMUnavailable):
+        return PROVIDER_BUSY_ERROR
+    if getattr(exc, "status_code", None) == 402 or "Error code: 402" in str(exc):
+        return PROVIDER_CREDITS_ERROR
+    return GENERIC_ERROR
+
+
 @router.get("/sessions")
 async def get_sessions(user_id: str = Depends(get_current_user)):
+    """Sessions newest-activity first, each with last_message_at and message_count.
+
+    Ordering by created_at alone reopened a two-month-old thread on load (the
+    user typed "Hi" and got "Hi again! I've got the recommendation engine
+    answer ready…"), and two sessions created in the same second tied, so the
+    pick was random. Sort by when the conversation was last *used*, and break
+    ties on id so the order is stable across requests.
+    """
     def fetch_sessions():
-        return database.supabase.table("chat_sessions").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
-    resp = await asyncio.to_thread(fetch_sessions)
-    return resp.data
+        return database.supabase.table("chat_sessions").select("*").eq("user_id", user_id).execute()
+
+    def fetch_activity():
+        return (database.supabase.table("chat_messages")
+                .select("session_id, created_at").eq("user_id", user_id).execute())
+
+    sessions_resp, activity_resp = await asyncio.gather(
+        asyncio.to_thread(fetch_sessions), asyncio.to_thread(fetch_activity)
+    )
+
+    last_at, count = {}, {}
+    for m in activity_resp.data or []:
+        sid = m["session_id"]
+        count[sid] = count.get(sid, 0) + 1
+        if m["created_at"] > last_at.get(sid, ""):
+            last_at[sid] = m["created_at"]
+
+    sessions = []
+    for s in sessions_resp.data or []:
+        s = dict(s)
+        s["last_message_at"] = last_at.get(s["id"])
+        s["message_count"] = count.get(s["id"], 0)
+        sessions.append(s)
+
+    # ISO-8601 strings from Postgres compare correctly as text.
+    sessions.sort(key=lambda s: (s["last_message_at"] or s["created_at"], str(s["id"])), reverse=True)
+    return sessions
 
 @router.post("/sessions")
 async def create_session(session: SessionCreate, user_id: str = Depends(get_current_user)):
@@ -94,7 +157,8 @@ async def chat_with_rag(query: ChatQuery, user_id: str = Depends(get_current_use
         await asyncio.to_thread(update_title)
         session_title = title
     
-    # 2. Convert to LangChain messages (Limit to last 10 to avoid Groq 8k TPM limits)
+    # 2. Convert to LangChain messages. Only the last 10 go to the model: the
+    # agent tier can fall back to Groq, whose per-minute token budget is 8K.
     messages = []
     
     # Slice to keep only the last 10 messages from the history
@@ -119,8 +183,10 @@ async def chat_with_rag(query: ChatQuery, user_id: str = Depends(get_current_use
             "content": query.query,
             "user_id": user_id
         }).execute()
-    await asyncio.to_thread(insert_user_msg)
-    
+    inserted = await asyncio.to_thread(insert_user_msg)
+    # Kept so a failed turn can remove its own row again (see the except below).
+    user_msg_id = inserted.data[0]["id"] if inserted.data else None
+
     # 5. Invoke LangGraph via Streaming
     logger.info(f"Streaming agent for session {query.session_id} with query: {query.query}")
     
@@ -221,7 +287,20 @@ async def chat_with_rag(query: ChatQuery, user_id: str = Depends(get_current_use
             
         except Exception as e:
             logger.error(f"Agent error in stream endpoint: {e}", exc_info=True)
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Sorry, I encountered an error answering your question.'})}\n\n"
+            # The user row was written in step 4, before streaming. With no reply
+            # row it is an orphan, and the next turn's history then has two
+            # consecutive user messages — the model answers both at once
+            # (TECHNICAL_DEBT #15, observed 2026-09-17). Remove it so a failed
+            # turn leaves no trace; the client still shows the error bubble.
+            if user_msg_id is not None:
+                def delete_orphan():
+                    return (database.supabase.table("chat_messages").delete()
+                            .eq("id", user_msg_id).eq("user_id", user_id).execute())
+                try:
+                    await asyncio.to_thread(delete_orphan)
+                except Exception as cleanup_err:
+                    logger.error(f"Could not remove orphan user message {user_msg_id}: {cleanup_err}")
+            yield f"data: {json.dumps({'type': 'error', 'message': user_facing_error(e)})}\n\n"
             
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

@@ -1,7 +1,7 @@
-import os
 import json
 import re
 import asyncio
+import functools
 from typing import TypedDict, Annotated, Sequence
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
@@ -17,6 +17,9 @@ from langchain_core.runnables import RunnableConfig
 import rag
 import database
 import job_search
+import models_config
+import llm
+import llm_budget
 import logging
 
 logger = logging.getLogger(__name__)
@@ -416,22 +419,53 @@ async def save_qa_to_collection(question: str, answer: str, config: RunnableConf
         logger.error(f"Save QA Error: {e}", exc_info=True)
         return f"Failed to save Q&A: {str(e)}"
 
-def get_llm():
-    """OpenRouter auto-routing: automatically picks the best available model for each request.
-    Uses the OpenAI-compatible endpoint so LangChain tool calling works natively.
-    Auto Exacto feature optimizes provider selection for tool-calling reliability."""
-    return ChatOpenAI(
-        model="openrouter/auto",
-        api_key=os.environ.get("OPENROUTER_API_KEY"),
-        base_url="https://openrouter.ai/api/v1",
-        temperature=0.3,
-        max_tokens=4000
-    )
-
 tools = [search_knowledge_base, get_resume, search_jobs, save_user_fact, search_web, save_qa_to_collection]
 
 # Dispatch table for tool_node. Derived from `tools` so the two cannot drift.
 TOOLS_BY_NAME = {t.name: t for t in tools}
+
+# Tool schemas as the provider sees them, for the token estimate below.
+_TOOL_SCHEMAS = [{"name": t.name, "description": t.description, "parameters": t.args} for t in tools]
+
+
+@functools.lru_cache(maxsize=None)
+def _chat_model(dep_name: str) -> ChatOpenAI:
+    """One LangChain client per deployment, built on first use.
+
+    Every provider in `models_config` speaks the OpenAI dialect, so the same
+    class serves Gemini, NVIDIA and Groq; only base_url and key differ. SDK
+    retries are off: the router decides when to retry and where.
+    """
+    dep = llm.deployment(dep_name)
+    return ChatOpenAI(
+        model=dep.model,
+        api_key=dep.api_key,
+        base_url=dep.base_url,
+        temperature=0.3,
+        max_tokens=models_config.AGENT_MAX_TOKENS,
+        max_retries=0,
+        timeout=models_config.LLM_TIMEOUT_S,
+    )
+
+
+async def invoke_agent_llm(messages):
+    """One agent turn through the router's budget-and-fallback loop.
+
+    Same behaviour as `llm.chat()` for the rest of the app: a deployment out
+    of budget is skipped, one that 429s is cooled and the next one takes the
+    turn. Tool-call ids are opaque strings echoed back, so a conversation can
+    move between providers mid-thread.
+    """
+    est = llm_budget.estimate_tokens(messages, models_config.AGENT_MAX_TOKENS, tools=_TOOL_SCHEMAS)
+
+    async def call(dep):
+        return await _chat_model(dep.name).bind_tools(tools).ainvoke(messages)
+
+    def usage_of(ai_message) -> int | None:
+        usage = getattr(ai_message, "usage_metadata", None) or {}
+        return usage.get("total_tokens")
+
+    return await llm.run("agent", est, call, usage_of, needs_tools=True)
 
 # The three practice modes the Chat screen offers. Each one changes how the
 # agent conducts the conversation, not what it is allowed to do.
@@ -535,10 +569,8 @@ SAVING TO COLLECTION RULES:
 """
     
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
-    logger.info("Agent node invoking OpenRouter LLM...")
-    llm = get_llm()
-    llm_with_tools = llm.bind_tools(tools)
-    response = await llm_with_tools.ainvoke(messages)
+    logger.info("Agent node invoking LLM...")
+    response = await invoke_agent_llm(messages)
     return {"messages": [response]}
 
 async def tool_node(state: AgentState, config: RunnableConfig = None):

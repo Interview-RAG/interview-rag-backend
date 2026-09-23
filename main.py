@@ -19,6 +19,7 @@ from routes.auth_routes import router as auth_router
 from routes.resume import router as resume_router
 from routes.practice import router as practice_router
 from routes.progress import router as progress_router
+from routes.health import router as health_router
 
 app = FastAPI(title="PrepAI API")
 
@@ -47,5 +48,6 @@ app.include_router(auth_router)
 app.include_router(resume_router)
 app.include_router(practice_router)
 app.include_router(progress_router)
+app.include_router(health_router)
 
 logger.info("PrepAI API has started successfully.")
